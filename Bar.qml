@@ -1,5 +1,6 @@
 import QtQuick
 import Quickshell
+import Quickshell.Hyprland
 import Quickshell.Io
 import Quickshell.Wayland
 import qs.Commons
@@ -48,6 +49,35 @@ Native.Bar {
       }
     }
     log("bar panels not found")
+  }
+
+  // Windows with this Hyprland tag draw their own top-edge bar while fullscreen
+  // or maximized, so the bar leaves that edge to them.
+  readonly property string peekSuppressingTag: "no-bar-peek"
+
+  function suppressesPeek(toplevel) {
+    const ipc = toplevel ? toplevel.lastIpcObject : null
+    if (!ipc || !(Number(ipc.fullscreen) > 0)) return false
+    // Tags set by a window rule carry a trailing asterisk.
+    return Array.from(ipc.tags || []).some(tag => tag === peekSuppressingTag || tag === peekSuppressingTag + "*")
+  }
+
+  function peekSuppressedOn(workspace) {
+    if (!workspace) return false
+    return Hyprland.toplevels.values.some(toplevel => !!toplevel && !!toplevel.workspace
+      && toplevel.workspace.id === workspace.id && suppressesPeek(toplevel))
+  }
+
+  // Hyprland's window list does not follow tags on its own. The native bar
+  // refreshes it on fullscreen changes; also refresh it when a window opens,
+  // a workspace becomes active or a monitor returns.
+  Connections {
+    target: Hyprland
+    function onRawEvent(event) {
+      const name = event ? String(event.name) : ""
+      if (name === "openwindow" || name === "workspacev2" || name === "monitoraddedv2")
+        Hyprland.refreshToplevels()
+    }
   }
 
   Component.onCompleted: Qt.callLater(findBarPanels)
@@ -121,6 +151,7 @@ Native.Bar {
           held: p.held, offset: p.offset, hover: p.hoverState,
           engaged: p.engaged, thickness: p.thickness, margin: p.modelData.margins.top,
           underFullscreen: p.modelData.underFullscreen === true, fullscreenInput: p.fullscreenInput,
+          suppressed: p.suppressed,
           exclusionMode: root.exclusionName(p.modelData.exclusionMode),
           popout: root.activePopout !== null && root.targetBelongsToWindow(root.activePopout, p.modelData),
           layer: root.layerName(p.modelData.WlrLayershell.layer),
@@ -173,6 +204,14 @@ Native.Bar {
         readonly property bool held: barHovered || (!!edge && edge.catching && edgeHovered)
           || popoutHere || slidingIn || popoutGrace.running
           || root.barDragWindow === modelData || root.barMoveWindow === modelData
+        readonly property bool suppressed: {
+          const monitor = modelData && modelData.screen ? Hyprland.monitorFor(modelData.screen) : null
+          return root.peekSuppressedOn(monitor ? monitor.activeWorkspace : null)
+        }
+        onSuppressedChanged: {
+          root.log(screenName + " suppressed=" + suppressed)
+          if (suppressed) setRevealed(false, "suppressed")
+        }
         readonly property int thickness: modelData && "thickness" in modelData ? modelData.thickness : root.barSize
         // While engaged this controller owns the bar's margin and layer. At rest
         // the native BarPanel parks its full-screen surface off screen on its
@@ -328,7 +367,7 @@ Native.Bar {
         // invisible strip cannot steal clicks from the window. While peeking it
         // is visible on the overlay layer, so give the strip its input back.
         readonly property bool fullscreenInput: ready && enabledHere && root.barHidden && engaged
-          && modelData.underFullscreen === true && modelData.dragActive !== true
+          && modelData.underFullscreen === true && modelData.dragActive !== true && !suppressed
         onFullscreenInputChanged: root.log(screenName + " mask=" + (fullscreenInput ? "peek" : "native"))
 
         Region {
@@ -352,7 +391,7 @@ Native.Bar {
           parent: peek.modelData.contentItem
           blocking: false
           onHoveredChanged: {
-            if (hovered && root.barHidden && peek.enabledHere) peek.setRevealed(true, "bar")
+            if (hovered && root.barHidden && peek.enabledHere && !peek.suppressed) peek.setRevealed(true, "bar")
             if (!hovered && peek.engaged) peek.probeLeave("leave")
           }
         }
@@ -393,7 +432,9 @@ Native.Bar {
 
         PanelWindow {
           id: edge
-          readonly property bool catching: visible && (!peek.revealed || !peek.barHovered)
+          // While suppressed the edge stays mapped but takes no input, so the
+          // pointer reaches the window's own bar whatever the overlay order.
+          readonly property bool catching: visible && !peek.suppressed && (!peek.revealed || !peek.barHovered)
           onCatchingChanged: root.log(peek.screenName + " edge catching=" + catching)
           onVisibleChanged: root.log(peek.screenName + " edge visible=" + visible)
           screen: peek.modelData.screen
@@ -413,7 +454,7 @@ Native.Bar {
 
           HoverHandler {
             id: edgeHover
-            onHoveredChanged: if (hovered) peek.setRevealed(true, "edge")
+            onHoveredChanged: if (hovered && !peek.suppressed) peek.setRevealed(true, "edge")
           }
         }
       }

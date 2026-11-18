@@ -141,6 +141,7 @@ def cleanup(*steps):
 
 
 CHECK_APP_ID = "topbar-plus-check"
+PEEK_SUPPRESSING_TAG = "no-bar-peek"
 
 
 def dispatch(expression):
@@ -163,16 +164,8 @@ def close_check_windows(processes):
     assert not check_windows(), "Check window is still open"
 
 
-def check_fullscreen(monitor, pointer, processes):
-    name = monitor["name"]
-    x, y = monitor["x"] + 100, monitor["y"]
-
-    def panel(s):
-        return next(p for p in s["screens"] if p["name"] == name)
-
-    move(x, y + 200, pointer)
-    wait_for(lambda s: not panel(s)["revealed"] and not panel(s)["engaged"])
-    dispatch(f'hl.dsp.focus({{ monitor = "{name}" }})')
+def open_check_window(monitor, processes, tag=None):
+    dispatch(f'hl.dsp.focus({{ monitor = "{monitor["name"]}" }})')
     processes.append(subprocess.Popen(
         ["foot", f"--app-id={CHECK_APP_ID}", "sleep", "600"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
@@ -182,9 +175,30 @@ def check_fullscreen(monitor, pointer, processes):
     window = next(iter(check_windows()), None)
     assert window, "Check window did not open"
     assert window["monitor"] == monitor["id"], ("Check window opened on another monitor", window)
-    dispatch(f'hl.dsp.window.fullscreen({{ mode = "fullscreen", action = "set", '
+    if tag:
+        dispatch(f'hl.dsp.window.tag({{ tag = "+{tag}", window = "address:{window["address"]}" }})')
+        deadline = time.monotonic() + 3
+        while tag not in next(iter(check_windows()), {}).get("tags", []) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert tag in next(iter(check_windows()), {}).get("tags", []), ("Check window was not tagged", tag)
+    return window
+
+
+def set_fullscreen(window, mode):
+    dispatch(f'hl.dsp.window.fullscreen({{ mode = "{mode}", action = "set", '
              f'window = "address:{window["address"]}" }})')
+
+
+def check_fullscreen(monitor, pointer, processes):
+    name = monitor["name"]
+    x, y = monitor["x"] + 100, monitor["y"]
+    panel = screen_panel(name)
+
+    rest_hidden(monitor, pointer)
+    window = open_check_window(monitor, processes)
+    set_fullscreen(window, "fullscreen")
     wait_for(lambda s: panel(s)["underFullscreen"])
+    assert not panel(state())["suppressed"], "An untagged fullscreen window suppressed the peek"
     wait_for(lambda s: not panel(s)["fullscreenInput"])
     before = geometry()
     move(x, y, pointer)
@@ -204,6 +218,60 @@ def check_fullscreen(monitor, pointer, processes):
     close_check_windows(processes)
     wait_for(lambda s: not panel(s)["underFullscreen"])
     print(f"PASS {name}: fullscreen peek takes input, tray works, input returns on hide")
+
+
+def check_suppressed(monitor, pointer, processes, mode):
+    # A tagged fullscreen or maximized window draws its own top-edge bar: the
+    # edge must neither reveal the bar nor take the pointer.
+    name = monitor["name"]
+    x, y = monitor["x"] + 100, monitor["y"]
+    panel = screen_panel(name)
+
+    rest_hidden(monitor, pointer)
+    window = open_check_window(monitor, processes, PEEK_SUPPRESSING_TAG)
+    set_fullscreen(window, mode)
+    wait_for(lambda s: panel(s)["suppressed"] and not panel(s)["hover"]["catching"])
+    before = geometry()
+    for pointer_y in [y, y + 1]:
+        move(x, pointer_y, pointer)
+        time.sleep(0.4)
+        current = panel(state())
+        assert not current["revealed"] and not current["engaged"], (f"Tagged {mode} window let the bar peek", current)
+        assert not current["hover"]["edge"], (f"Edge took the pointer over a tagged {mode} window", current)
+    assert_parked(monitor)
+    assert geometry() == before, "Suppressed edge changed client geometry or reserved space"
+    rest_hidden(monitor, pointer)
+    close_check_windows(processes)
+    wait_for(lambda s: not panel(s)["suppressed"])
+    print(f"PASS {name}: tagged {mode} window keeps the edge, no peek, edge takes no pointer")
+
+
+def check_suppressed_while_peeking(monitor, pointer, processes):
+    # A tagged window going fullscreen under a peeking bar hides the bar.
+    name = monitor["name"]
+    x, y = monitor["x"] + 100, monitor["y"]
+    panel = screen_panel(name)
+
+    rest_hidden(monitor, pointer)
+    window = open_check_window(monitor, processes, PEEK_SUPPRESSING_TAG)
+    assert not panel(state())["suppressed"], "A tagged window out of fullscreen suppressed the peek"
+    move(x, y, pointer)
+    wait_for(lambda s: panel(s)["offset"] == 0 and panel(s)["revealed"])
+    move(x, y + 12, pointer)
+    wait_for(lambda s: panel(s)["hover"]["bar"])
+    set_fullscreen(window, "fullscreen")
+    wait_for(lambda s: panel(s)["suppressed"] and not panel(s)["revealed"]
+             and not panel(s)["engaged"] and not panel(s)["hover"]["catching"])
+    for pointer_y in [y + 12, y]:
+        move(x, pointer_y, pointer)
+        time.sleep(0.4)
+        current = panel(state())
+        assert not current["revealed"] and not current["hover"]["edge"], ("Bar came back over a tagged window", current)
+    assert_parked(monitor)
+    rest_hidden(monitor, pointer)
+    close_check_windows(processes)
+    wait_for(lambda s: not panel(s)["suppressed"])
+    print(f"PASS {name}: tagged window going fullscreen hides the peeking bar")
 
 
 def click(pointer, button=ecodes.BTN_LEFT):
@@ -425,6 +493,9 @@ def check(monitor_name=None):
 
         for monitor in monitors:
             check_fullscreen(monitor, pointer, processes)
+            for mode in ["fullscreen", "maximized"]:
+                check_suppressed(monitor, pointer, processes, mode)
+            check_suppressed_while_peeking(monitor, pointer, processes)
 
         if not monitor_name:
             # Every screen's clock registers omarchy.clock and only the first

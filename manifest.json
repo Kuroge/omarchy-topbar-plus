@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.kuroge.topbar-plus",
   "name": "Omarchy Top Bar Plus",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "Adrian Garcia Riera <35804986+Kuroge@users.noreply.github.com>",
   "description": "Reveal the hidden Omarchy top bar per monitor at the screen edge, over windows.",
   "kinds": ["bar"],

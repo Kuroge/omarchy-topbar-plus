@@ -49,11 +49,31 @@ omarchy bar use omarchy.bar
 omarchy plugin remove io.github.kuroge.topbar-plus --yes
 ```
 
+## Apps with their own top bar
+
+Some fullscreen apps, such as the RDPchy remote desktop client, slide down
+their own bar from the top edge. Tag their windows `no-bar-peek` with a
+Hyprland window rule, for example in `~/.config/hypr/hyprland.lua`:
+
+```lua
+o.window("^com\\.freerdp\\.client\\.sdl3$", { tag = "+no-bar-peek" })
+```
+
+While a tagged window is fullscreen or maximized on a screen's active
+workspace, that screen's bar does not peek and its edge trigger takes no
+pointer input, so the edge belongs to the app. A peeking bar slides out when
+that happens. Out of fullscreen, and for untagged fullscreen windows, the bar
+peeks as usual.
+
 ## Known limitations
 
 - The QML inheritance and panel discovery use **internal bar implementation
   details**, not a promised stable Omarchy API. Omarchy updates may require a
   plugin update.
+- Hyprland sends no event when a tag changes. A tag added by hand to a window
+  that is already fullscreen takes effect at the next fullscreen change,
+  window opening or workspace switch. Tags set by a window rule apply when the
+  window opens.
 
 ## How it works
 
@@ -133,6 +153,9 @@ expansion, movement across app icons, right-click management, and collapse in
 both hidden and pinned modes. Tray checks report a skip when there are no
 drawer items. On each screen it also opens a temporary `foot` window, makes it
 fullscreen and checks that the peeking bar takes input there and hands it back.
+It repeats that with the window tagged `no-bar-peek`, fullscreen and maximized,
+and checks that the edge neither reveals the bar nor takes the pointer, and that
+a peeking bar slides out when a tagged window goes fullscreen.
 Afterwards it closes the check windows, refocuses your window, closes any
 popout and restores the pointer and the hidden preference; each cleanup step
 runs even if another fails.
