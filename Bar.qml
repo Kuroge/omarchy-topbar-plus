@@ -75,11 +75,23 @@ Native.Bar {
       }
       return null
     }
+    function findChevron(item) {
+      if ("bar" in item && (item.text === "" || item.text === "")) return item
+      for (const child of item.children || []) {
+        const found = findChevron(child)
+        if (found) return found
+      }
+      return null
+    }
     const tray = find(window.contentItem)
     if (!tray) return null
     const point = tray.mapToItem(window.contentItem, 0, 0)
+    const chevron = findChevron(tray)
+    const chevronPoint = chevron ? chevron.mapToItem(window.contentItem, 0, 0) : null
     return { x: point.x, y: point.y, height: tray.height,
       slot: tray.trayItemExtent, extent: tray.drawerExtent,
+      fixedAtStart: tray.fixedAtStart,
+      chevron: chevron ? { x: chevronPoint.x, y: chevronPoint.y, w: chevron.width, h: chevron.height } : null,
       expanded: tray.expanded, progress: tray.revealProgress,
       manageOpen: tray.managePopupOpen }
   }
@@ -88,10 +100,12 @@ Native.Bar {
     target: "topbar-plus"
     function status(): string {
       return JSON.stringify({ hidden: root.barHidden, position: root.position, debug: root.debug,
+        popout: root.activePopout !== null,
         screens: peekControllers.instances.map(p => ({
           name: p.modelData.screen.name, revealed: p.revealed,
           held: p.held, offset: p.offset, hover: p.hoverState,
           engaged: p.engaged, thickness: p.thickness, margin: p.modelData.margins.top,
+          popout: root.activePopout !== null && root.targetBelongsToWindow(root.activePopout, p.modelData),
           layer: root.layerName(p.modelData.WlrLayershell.layer),
           tray: root.trayState(p.modelData)
         })) })
