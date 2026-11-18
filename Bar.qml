@@ -55,7 +55,7 @@ Native.Bar {
   }
 
   IpcHandler {
-    target: "topbar-peek"
+    target: "topbar-plus"
     function status(): string {
       return JSON.stringify({ hidden: root.barHidden, position: root.position,
         screens: peekControllers.instances.map(p => ({
@@ -138,7 +138,7 @@ Native.Bar {
           // Hand input back after the pointer enters the bar. Clearing the
           // mask at animation end alone may not generate a new pointer enter.
           mask: Region { width: edge.catching ? edge.width : 0; height: 2 }
-          WlrLayershell.namespace: "omarchy-topbar-peek-edge"
+          WlrLayershell.namespace: "omarchy-topbar-plus-edge"
           WlrLayershell.layer: WlrLayer.Overlay
           WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
 

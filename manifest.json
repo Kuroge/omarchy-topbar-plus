@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
-  "id": "io.github.whitehades.topbar-peek",
-  "name": "Omarchy Top Bar Peek",
+  "id": "io.github.kuroge.topbar-plus",
+  "name": "Omarchy Top Bar Plus",
   "version": "0.1.0",
-  "author": "WhiteHades",
-  "description": "Reveal your hidden Omarchy top bar at the screen edge, without moving windows.",
+  "author": "Adrian Garcia Riera <35804986+Kuroge@users.noreply.github.com>",
+  "description": "Reveal the hidden Omarchy top bar per monitor at the screen edge, over windows.",
   "kinds": ["bar"],
   "entryPoints": { "bar": "Bar.qml" },
   "omarchy": { "clonedFrom": "omarchy.bar" }
