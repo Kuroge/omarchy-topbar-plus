@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
+import qs.Commons
 import qs.plugins.bar as Native
 import qs.Ui
 
@@ -90,6 +91,8 @@ Native.Bar {
         screens: peekControllers.instances.map(p => ({
           name: p.modelData.screen.name, revealed: p.revealed,
           held: p.held, offset: p.offset, hover: p.hoverState,
+          engaged: p.engaged, thickness: p.thickness, margin: p.modelData.margins.top,
+          layer: root.layerName(p.modelData.WlrLayershell.layer),
           tray: root.trayState(p.modelData)
         })) })
     }
@@ -122,8 +125,12 @@ Native.Bar {
         readonly property bool held: barHover.hovered || (edge.catching && edgeHover.hovered)
           || (root.activePopout !== null && root.targetBelongsToWindow(root.activePopout, modelData))
           || root.barDragWindow === modelData || root.barMoveWindow === modelData
-        readonly property real targetOffset: enabledHere && root.barHidden && !revealed ? -root.barSize : 0
-        property real offset: targetOffset
+        readonly property int thickness: modelData && "thickness" in modelData ? modelData.thickness : root.barSize
+        // While engaged this controller owns the bar's margin and layer. At rest
+        // the native BarPanel parks its full-screen surface off screen on its
+        // usual layer, so no transparent overlay stays above the windows.
+        property bool engaged: false
+        property real offset: -thickness
 
         function setRevealed(value, reason) {
           if (revealed === value) return
@@ -131,8 +138,37 @@ Native.Bar {
           revealed = value
         }
 
-        onRevealedChanged: root.log(screenName + " revealed=" + revealed + " reason=" + revealReason)
-        onTargetOffsetChanged: root.log(screenName + " targetOffset=" + targetOffset)
+        function slideTo(target) {
+          slide.stop()
+          if (Style.duration(140) <= 0) {
+            offset = target
+            settle()
+            return
+          }
+          slide.to = target
+          slide.start()
+        }
+
+        function settle() {
+          if (!revealed) engaged = false
+        }
+
+        function park() {
+          slide.stop()
+          engaged = false
+          offset = -thickness
+        }
+
+        onRevealedChanged: {
+          root.log(screenName + " revealed=" + revealed + " reason=" + revealReason)
+          if (!root.barHidden || !enabledHere) return
+          if (revealed && !engaged) {
+            offset = -thickness
+            engaged = true
+          }
+          slideTo(revealed ? 0 : -thickness)
+        }
+        onEngagedChanged: root.log(screenName + " placement=" + (engaged ? "peek" : "native"))
         onHeldChanged: {
           if (!root.debug) return
           root.log(screenName + " held=" + held
@@ -142,15 +178,26 @@ Native.Bar {
             + " popout=" + (root.activePopout !== null))
         }
 
-        Behavior on offset {
+        NumberAnimation {
+          id: slide
+          target: peek
+          property: "offset"
           // Same duration and easing as Omarchy's PopupCard.
-          NumberAnimation { duration: 140; easing.type: Easing.OutCubic }
+          duration: Style.duration(140)
+          easing.type: Easing.OutCubic
+          onFinished: peek.settle()
         }
 
         Connections {
           target: root
-          function onBarHiddenChanged() { peek.setRevealed(false, "barHidden") }
-          function onPositionChanged() { peek.setRevealed(false, "position") }
+          function onBarHiddenChanged() {
+            peek.setRevealed(false, "barHidden")
+            peek.park()
+          }
+          function onPositionChanged() {
+            peek.setRevealed(false, "position")
+            peek.park()
+          }
         }
 
         Connections {
@@ -170,7 +217,7 @@ Native.Bar {
           target: peek.modelData
           property: "margins.top"
           value: Math.round(peek.offset)
-          when: peek.ready && peek.enabledHere
+          when: peek.ready && peek.enabledHere && root.barHidden && peek.engaged
           restoreMode: Binding.RestoreBindingOrValue
         }
 
@@ -178,7 +225,7 @@ Native.Bar {
           target: peek.modelData.WlrLayershell
           property: "layer"
           value: WlrLayer.Overlay
-          when: peek.ready && peek.enabledHere && root.barHidden
+          when: peek.ready && peek.enabledHere && root.barHidden && peek.engaged
           restoreMode: Binding.RestoreBindingOrValue
         }
 
