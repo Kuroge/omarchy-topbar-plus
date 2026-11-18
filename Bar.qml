@@ -15,6 +15,24 @@ Native.Bar {
   property var nativeBarVariants: null
   readonly property var peekWindows: nativeBarVariants ? nativeBarVariants.instances : []
 
+  property bool debug: false
+
+  function log(message) {
+    if (debug) console.log("[topbar-plus] " + message)
+  }
+
+  function layerName(layer) {
+    return ["background", "bottom", "top", "overlay"][layer] ?? String(layer)
+  }
+
+  function exclusionName(mode) {
+    return ["normal", "ignore", "auto"][mode] ?? String(mode)
+  }
+
+  function screenNames(windows) {
+    return Array.from(windows || [], w => w && w.screen ? w.screen.name : "?").join(", ")
+  }
+
   function findBarPanels() {
     for (const child of root.data) {
       if (child === peekControllers) continue
@@ -23,16 +41,27 @@ Native.Bar {
         if (instance && "contentItem" in instance && "screen" in instance
             && !("ghostScreen" in instance)) {
           nativeBarVariants = child
+          log("bar panels found: " + screenNames(child.instances))
           return
         }
       }
     }
+    log("bar panels not found")
   }
 
   Component.onCompleted: Qt.callLater(findBarPanels)
   Connections {
     target: Quickshell
-    function onScreensChanged() { Qt.callLater(root.findBarPanels) }
+    function onScreensChanged() {
+      root.log("screens changed: " + Array.from(Quickshell.screens, s => s.name).join(", "))
+      Qt.callLater(root.findBarPanels)
+    }
+  }
+
+  Connections {
+    target: root
+    function onBarHiddenChanged() { root.log("barHidden=" + root.barHidden) }
+    function onActivePopoutChanged() { root.log("activePopout=" + (root.activePopout ? String(root.activePopout) : "none")) }
   }
 
   // Read native tray state for the live interaction regression check.
@@ -57,12 +86,17 @@ Native.Bar {
   IpcHandler {
     target: "topbar-plus"
     function status(): string {
-      return JSON.stringify({ hidden: root.barHidden, position: root.position,
+      return JSON.stringify({ hidden: root.barHidden, position: root.position, debug: root.debug,
         screens: peekControllers.instances.map(p => ({
           name: p.modelData.screen.name, revealed: p.revealed,
           held: p.held, offset: p.offset, hover: p.hoverState,
           tray: root.trayState(p.modelData)
         })) })
+    }
+    function setDebug(enabled: bool): string {
+      root.debug = enabled
+      root.log("debug enabled; panels: " + root.screenNames(root.peekWindows))
+      return enabled ? "debug on" : "debug off"
     }
   }
 
@@ -74,15 +108,39 @@ Native.Bar {
       Item {
         id: peek
         required property var modelData
+        readonly property string screenName: modelData && modelData.screen ? modelData.screen.name : "?"
         property bool ready: false
-        Component.onCompleted: Qt.callLater(() => ready = true)
+        Component.onCompleted: {
+          Qt.callLater(() => ready = true)
+          root.log(screenName + " controller created")
+        }
+        Component.onDestruction: root.log(screenName + " controller destroyed")
         readonly property bool enabledHere: root.position === "top"
         property bool revealed: false
+        property string revealReason: ""
         readonly property var hoverState: ({ bar: barHover.hovered, edge: edgeHover.hovered, catching: edge.catching })
         readonly property bool held: barHover.hovered || (edge.catching && edgeHover.hovered)
           || (root.activePopout !== null && root.targetBelongsToWindow(root.activePopout, modelData))
           || root.barDragWindow === modelData || root.barMoveWindow === modelData
-        property real offset: enabledHere && root.barHidden && !revealed ? -root.barSize : 0
+        readonly property real targetOffset: enabledHere && root.barHidden && !revealed ? -root.barSize : 0
+        property real offset: targetOffset
+
+        function setRevealed(value, reason) {
+          if (revealed === value) return
+          revealReason = reason
+          revealed = value
+        }
+
+        onRevealedChanged: root.log(screenName + " revealed=" + revealed + " reason=" + revealReason)
+        onTargetOffsetChanged: root.log(screenName + " targetOffset=" + targetOffset)
+        onHeldChanged: {
+          if (!root.debug) return
+          root.log(screenName + " held=" + held
+            + " bar=" + (barHover ? barHover.hovered : null)
+            + " edge=" + (edgeHover ? edgeHover.hovered : null)
+            + " catching=" + (edge ? edge.catching : null)
+            + " popout=" + (root.activePopout !== null))
+        }
 
         Behavior on offset {
           // Same duration and easing as Omarchy's PopupCard.
@@ -91,8 +149,21 @@ Native.Bar {
 
         Connections {
           target: root
-          function onBarHiddenChanged() { peek.revealed = false }
-          function onPositionChanged() { peek.revealed = false }
+          function onBarHiddenChanged() { peek.setRevealed(false, "barHidden") }
+          function onPositionChanged() { peek.setRevealed(false, "position") }
+        }
+
+        Connections {
+          target: peek.modelData
+          ignoreUnknownSignals: true
+          function onUnderFullscreenChanged() { root.log(peek.screenName + " underFullscreen=" + peek.modelData.underFullscreen) }
+          function onExclusionModeChanged() { root.log(peek.screenName + " exclusionMode=" + root.exclusionName(peek.modelData.exclusionMode)) }
+        }
+
+        Connections {
+          target: peek.modelData ? peek.modelData.WlrLayershell : null
+          ignoreUnknownSignals: true
+          function onLayerChanged() { root.log(peek.screenName + " layer=" + root.layerName(peek.modelData.WlrLayershell.layer)) }
         }
 
         Binding {
@@ -117,18 +188,20 @@ Native.Bar {
           // widget hover handlers, including the tray drawer, even if passive.
           parent: peek.modelData.contentItem
           blocking: false
-          onHoveredChanged: if (hovered && root.barHidden && peek.enabledHere) peek.revealed = true
+          onHoveredChanged: if (hovered && root.barHidden && peek.enabledHere) peek.setRevealed(true, "bar")
         }
 
         Timer {
           interval: 120
           running: peek.revealed && !peek.held
-          onTriggered: if (!peek.held) peek.revealed = false
+          onTriggered: if (!peek.held) peek.setRevealed(false, "timer")
         }
 
         PanelWindow {
           id: edge
           readonly property bool catching: visible && (!peek.revealed || !barHover.hovered)
+          onCatchingChanged: root.log(peek.screenName + " edge catching=" + catching)
+          onVisibleChanged: root.log(peek.screenName + " edge visible=" + visible)
           screen: peek.modelData.screen
           visible: peek.ready && peek.enabledHere && root.barHidden && !edgeRemap.remapping
           color: "transparent"
@@ -146,7 +219,7 @@ Native.Bar {
 
           HoverHandler {
             id: edgeHover
-            onHoveredChanged: if (hovered) peek.revealed = true
+            onHoveredChanged: if (hovered) peek.setRevealed(true, "edge")
           }
         }
       }
