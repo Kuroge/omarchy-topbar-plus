@@ -51,9 +51,6 @@ omarchy plugin remove io.github.kuroge.topbar-plus --yes
 
 ## Known limitations
 
-- Under a fullscreen window the bar slides in but does not take pointer input.
-  Omarchy 4.5 clears the bar's input region on purpose while a fullscreen window
-  is on its screen.
 - The QML inheritance and panel discovery use **internal bar implementation
   details**, not a promised stable Omarchy API. Omarchy updates may require a
   plugin update.
@@ -75,6 +72,11 @@ the native bar. The stock bar keeps `ExclusionMode.Ignore` because its
 `barHidden` state stays true, so no space is reserved. No polling process,
 extra daemon, copied widget implementation, packaged-file edit, or Hyprland
 rule is needed.
+
+Omarchy clears the bar's input region while a fullscreen window is on its
+screen, so the invisible strip cannot take that window's clicks. While peeking
+over a fullscreen window, the plugin gives the visible strip its input back and
+restores the native empty region once the bar has slid out.
 
 Once the pointer enters the bar below the trigger, the trigger releases input.
 Popouts hold the bar until dismissed so you can move into them without losing
@@ -117,8 +119,11 @@ the native park at rest, unchanged window geometry and monitor reserved space,
 popup retention, hide, and normal pinned visibility. It also checks native tray
 expansion, movement across app icons, right-click management, and collapse in
 both hidden and pinned modes. Tray checks report a skip when there are no
-drawer items. Afterwards it closes any popout and restores the pointer and the
-hidden preference; each cleanup step runs even if another fails.
+drawer items. On each screen it also opens a temporary `foot` window, makes it
+fullscreen and checks that the peeking bar takes input there and hands it back.
+Afterwards it closes the check windows, refocuses your window, closes any
+popout and restores the pointer and the hidden preference; each cleanup step
+runs even if another fails.
 
 `--monitor` checks a single output, for mixed-DPI testing. `--appearance`
 repeats the check with every bar background (`opaque`, `glassy`, `none`) with

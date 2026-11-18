@@ -67,6 +67,20 @@ def assert_parked(monitor):
     raise AssertionError((monitor["name"], "bar is not parked natively", layers))
 
 
+def wait_overlay(monitor):
+    # QML animation completion precedes the compositor's frame commit,
+    # especially on a headless output. Check the committed placement.
+    name, y = monitor["name"], monitor["y"]
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline:
+        layers = json.loads(run("hyprctl", "layers", "-j"))[name]["levels"][OVERLAY_LEVEL]
+        if any(w["namespace"] == "omarchy-bar" and w["y"] == y for w in layers):
+            return layers
+        time.sleep(0.02)
+    raise AssertionError((name, "bar did not reach the overlay edge", layers, state(),
+                          run("hyprctl", "cursorpos", "-j")))
+
+
 def close_popouts():
     # Toggling the clock closes it, or switches any other popout, including
     # tray management, to the clock so the next toggle closes it.
@@ -88,6 +102,72 @@ def cleanup(*steps):
             failures.append(error)
             print(f"CLEANUP FAILED: {error!r}", file=sys.stderr)
     return failures
+
+
+CHECK_APP_ID = "topbar-plus-check"
+
+
+def dispatch(expression):
+    run("hyprctl", "eval", f"hl.dispatch({expression})")
+
+
+def check_windows():
+    return [c for c in json.loads(run("hyprctl", "clients", "-j"))
+            if c["class"] == CHECK_APP_ID]
+
+
+def close_check_windows(processes):
+    for process in processes:
+        if process.poll() is None:
+            process.terminate()
+            process.wait(timeout=3)
+    deadline = time.monotonic() + 3
+    while check_windows() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert not check_windows(), "Check window is still open"
+
+
+def check_fullscreen(monitor, pointer, processes):
+    name = monitor["name"]
+    x, y = monitor["x"] + 100, monitor["y"]
+
+    def panel(s):
+        return next(p for p in s["screens"] if p["name"] == name)
+
+    move(x, y + 200, pointer)
+    wait_for(lambda s: not panel(s)["revealed"] and not panel(s)["engaged"])
+    dispatch(f'hl.dsp.focus({{ monitor = "{name}" }})')
+    processes.append(subprocess.Popen(
+        ["foot", f"--app-id={CHECK_APP_ID}", "sleep", "600"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
+    deadline = time.monotonic() + 5
+    while not check_windows() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    window = next(iter(check_windows()), None)
+    assert window, "Check window did not open"
+    assert window["monitor"] == monitor["id"], ("Check window opened on another monitor", window)
+    dispatch(f'hl.dsp.window.fullscreen({{ mode = "fullscreen", action = "set", '
+             f'window = "address:{window["address"]}" }})')
+    wait_for(lambda s: panel(s)["underFullscreen"])
+    wait_for(lambda s: not panel(s)["fullscreenInput"])
+    before = geometry()
+    move(x, y, pointer)
+    wait_for(lambda s: panel(s)["offset"] == 0 and panel(s)["revealed"]
+             and panel(s)["fullscreenInput"])
+    wait_overlay(monitor)
+    move(x, y + 12, pointer)
+    wait_for(lambda s: panel(s)["hover"]["bar"])
+    time.sleep(0.4)
+    assert panel(state())["revealed"], "Fullscreen bar lost the pointer over its widgets"
+    check_tray(monitor, pointer)
+    move(x, y + 200, pointer)
+    wait_for(lambda s: not panel(s)["revealed"] and not panel(s)["engaged"]
+             and not panel(s)["fullscreenInput"])
+    assert_parked(monitor)
+    assert geometry() == before, "Fullscreen peek changed client geometry or reserved space"
+    close_check_windows(processes)
+    wait_for(lambda s: not panel(s)["underFullscreen"])
+    print(f"PASS {name}: fullscreen peek takes input, tray works, input returns on hide")
 
 
 def check_tray(monitor, pointer):
@@ -157,6 +237,8 @@ def check(monitor_name=None):
     if monitor_name:
         monitors = [m for m in monitors if m["name"] == monitor_name]
         assert monitors, f"Monitor not found: {monitor_name}"
+    focused = json.loads(run("hyprctl", "activewindow", "-j") or "{}")
+    processes = []
     pointer = UInput({ecodes.EV_KEY: [ecodes.BTN_LEFT, ecodes.BTN_RIGHT],
                       ecodes.EV_REL: [ecodes.REL_X, ecodes.REL_Y]},
                      name="topbar-plus-check")
@@ -186,16 +268,7 @@ def check(monitor_name=None):
             wait_for(lambda s: panel(s)["offset"] == 0 and panel(s)["revealed"])
             assert flag.exists(), "Hover changed the user's hidden preference"
             assert geometry() == before, "Hover changed client geometry or reserved space"
-            # QML animation completion precedes the compositor's frame commit,
-            # especially on a headless output. Check the committed placement.
-            deadline = time.monotonic() + 3
-            while time.monotonic() < deadline:
-                layers = json.loads(run("hyprctl", "layers", "-j"))[name]["levels"][OVERLAY_LEVEL]
-                if any(w["namespace"] == "omarchy-bar" and w["y"] == y for w in layers):
-                    break
-                time.sleep(0.02)
-            else:
-                raise AssertionError((name, "bar did not reach the overlay edge", layers, state(), run("hyprctl", "cursorpos", "-j")))
+            layers = wait_overlay(monitor)
             physical_width = monitor["height"] if monitor["transform"] % 2 else monitor["width"]
             logical_width = round(physical_width / monitor["scale"])
             for namespace in ["omarchy-bar", EDGE_NAMESPACE]:
@@ -223,6 +296,9 @@ def check(monitor_name=None):
             assert_parked(monitor)
             assert geometry() == before, "Hiding changed client geometry or reserved space"
             print(f"PASS {name}: edge, widget hover, overlay, hide, native park, unchanged geometry")
+
+        for monitor in monitors:
+            check_fullscreen(monitor, pointer, processes)
 
         if not monitor_name:
             # Every screen's clock registers omarchy.clock and only the first
@@ -260,6 +336,9 @@ def check(monitor_name=None):
             check_tray(monitor, pointer)
     finally:
         failures = cleanup(
+            lambda: close_check_windows(processes),
+            lambda: focused.get("address") and dispatch(
+                f'hl.dsp.focus({{ window = "address:{focused["address"]}" }})'),
             close_popouts,
             lambda: run("omarchy", "toggle", "bar", "on" if was_hidden else "off"),
             pointer.close,
