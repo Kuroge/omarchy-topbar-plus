@@ -127,6 +127,14 @@ Native.Bar {
           tray: root.trayState(p.modelData)
         })) })
     }
+    function probe(): string {
+      for (const p of peekControllers.instances) p.probeLeave("ipc")
+      return "probing " + peekControllers.instances.length
+    }
+    function nudge(): string {
+      for (const p of peekControllers.instances) p.nudgePointer("ipc")
+      return "nudging " + peekControllers.instances.length
+    }
     function setDebug(enabled: bool): string {
       root.debug = enabled
       root.log("debug enabled; panels: " + root.screenNames(root.peekWindows))
@@ -217,6 +225,7 @@ Native.Bar {
         // bar learns it is hovered instead of hiding and bouncing back.
         Process {
           id: pointerNudge
+          onExited: (code, status) => root.log(peek.screenName + " nudge exited code=" + code)
           command: ["hyprctl", "eval",
             "local p = hl.get_cursor_pos(); if p then hl.dispatch(hl.dsp.cursor.move({ x = p.x, y = p.y })) end"]
         }
@@ -327,7 +336,38 @@ Native.Bar {
           // widget hover handlers, including the tray drawer, even if passive.
           parent: peek.modelData.contentItem
           blocking: false
-          onHoveredChanged: if (hovered && root.barHidden && peek.enabledHere) peek.setRevealed(true, "bar")
+          onHoveredChanged: {
+            if (hovered && root.barHidden && peek.enabledHere) peek.setRevealed(true, "bar")
+            if (!hovered && peek.engaged) peek.probeLeave("leave")
+          }
+        }
+
+        function probeLeave(reason) {
+          if (!root.debug) return
+          root.log(screenName + " probe start: " + reason + " running=" + leaveProbe.running)
+          if (!leaveProbe.running) leaveProbe.running = true
+        }
+
+        // Debug only: where the pointer really is when the bar reports a leave.
+        Process {
+          id: leaveProbe
+          onExited: (code, status) => root.log(peek.screenName + " probe exited code=" + code)
+          command: ["hyprctl", "cursorpos", "-j"]
+          stdout: StdioCollector {
+            waitForEnd: true
+            onStreamFinished: {
+              let inside = "?"
+              try {
+                const p = JSON.parse(text)
+                const screen = peek.modelData.screen
+                inside = p.x >= screen.x && p.x < screen.x + screen.width
+                  && p.y >= screen.y && p.y < screen.y + peek.thickness + Math.round(peek.offset)
+              } catch (error) {}
+              root.log(peek.screenName + " bar leave: cursor=" + text.replace(/\s+/g, "") + " insideBar=" + inside
+                + " offset=" + Math.round(peek.offset) + " tooltip=" + root.tooltipShown
+                + " popout=" + (root.activePopout !== null))
+            }
+          }
         }
 
         Timer {

@@ -205,6 +205,25 @@ def check_fast_entry(monitor, pointer):
     print(f"PASS {name}: fast entry from the edge keeps the bar")
 
 
+def check_edge_rest(monitor, pointer):
+    # A pointer pushed against the top edge rests inside both the edge trigger
+    # and the bar. The bar must stay revealed without bouncing.
+    name = monitor["name"]
+    panel = screen_panel(name)
+    x, y = monitor["x"] + 100, monitor["y"]
+    for pointer_y in [y, y + 1]:
+        rest_hidden(monitor, pointer)
+        hides = panel(state())["hides"]
+        move(x, pointer_y, pointer)
+        wait_for(lambda s: panel(s)["revealed"])
+        time.sleep(1)
+        current = panel(state())
+        assert current["hides"] == hides and current["revealed"], (
+            f"Resting at y={pointer_y - y} hid the bar", current)
+    rest_hidden(monitor, pointer)
+    print(f"PASS {name}: resting against the top edge keeps the bar")
+
+
 def check_popout_rest(monitor, pointer):
     # Closing a popout with the pointer resting on the bar must not make the
     # bar slide out and straight back in.
@@ -365,6 +384,7 @@ def check(monitor_name=None):
 
         for monitor in monitors:
             check_fast_entry(monitor, pointer)
+            check_edge_rest(monitor, pointer)
             check_popout_rest(monitor, pointer)
 
         for monitor in monitors:
