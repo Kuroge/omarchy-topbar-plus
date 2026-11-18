@@ -65,7 +65,22 @@ Native.Bar {
     function onActivePopoutChanged() { root.log("activePopout=" + (root.activePopout ? String(root.activePopout) : "none")) }
   }
 
-  // Read native tray state for the live interaction regression check.
+  // Read native widget geometry and tray state for the live regression check.
+  function moduleRect(window, moduleName) {
+    function find(item) {
+      if (item.moduleName === moduleName) return item
+      for (const child of item.children || []) {
+        const found = find(child)
+        if (found) return found
+      }
+      return null
+    }
+    const item = find(window.contentItem)
+    if (!item) return null
+    const point = item.mapToItem(window.contentItem, 0, 0)
+    return { x: point.x, y: point.y, w: item.width, h: item.height }
+  }
+
   function trayState(window) {
     function find(item) {
       if (item.moduleName === "omarchy.tray" && "drawerExtent" in item) return item
@@ -108,6 +123,7 @@ Native.Bar {
           underFullscreen: p.modelData.underFullscreen === true, fullscreenInput: p.fullscreenInput,
           popout: root.activePopout !== null && root.targetBelongsToWindow(root.activePopout, p.modelData),
           layer: root.layerName(p.modelData.WlrLayershell.layer),
+          hides: p.hideCount, clock: root.moduleRect(p.modelData, "omarchy.clock"),
           tray: root.trayState(p.modelData)
         })) })
     }
@@ -136,9 +152,14 @@ Native.Bar {
         readonly property bool enabledHere: root.position === "top"
         property bool revealed: false
         property string revealReason: ""
+        property int hideCount: 0
         readonly property var hoverState: ({ bar: barHover.hovered, edge: edgeHover.hovered, catching: edge.catching })
+        readonly property bool popoutHere: root.activePopout !== null
+          && root.targetBelongsToWindow(root.activePopout, modelData)
+        // Sliding in, the bar is still on its way under a pointer that left the edge.
+        property bool slidingIn: false
         readonly property bool held: barHover.hovered || (edge.catching && edgeHover.hovered)
-          || (root.activePopout !== null && root.targetBelongsToWindow(root.activePopout, modelData))
+          || popoutHere || slidingIn || popoutGrace.running
           || root.barDragWindow === modelData || root.barMoveWindow === modelData
         readonly property int thickness: modelData && "thickness" in modelData ? modelData.thickness : root.barSize
         // While engaged this controller owns the bar's margin and layer. At rest
@@ -155,6 +176,7 @@ Native.Bar {
 
         function slideTo(target) {
           slide.stop()
+          slidingIn = target === 0
           if (Style.duration(140) <= 0) {
             offset = target
             settle()
@@ -165,17 +187,21 @@ Native.Bar {
         }
 
         function settle() {
+          slidingIn = false
           if (!revealed) engaged = false
+          else if (!barHover.hovered && !edgeHover.hovered) nudgePointer("slide-in ended")
         }
 
         function park() {
           slide.stop()
+          slidingIn = false
           engaged = false
           offset = -thickness
         }
 
         onRevealedChanged: {
           root.log(screenName + " revealed=" + revealed + " reason=" + revealReason)
+          if (!revealed) hideCount++
           if (!root.barHidden || !enabledHere) return
           if (revealed && !engaged) {
             offset = -thickness
@@ -184,6 +210,36 @@ Native.Bar {
           slideTo(revealed ? 0 : -thickness)
         }
         onEngagedChanged: root.log(screenName + " placement=" + (engaged ? "peek" : "native"))
+
+        // Hyprland tells a surface that moved under a resting pointer, or that
+        // a closed popout uncovered, only on the next motion. Warping the
+        // pointer onto its own position makes it pick the surface again, so the
+        // bar learns it is hovered instead of hiding and bouncing back.
+        Process {
+          id: pointerNudge
+          command: ["hyprctl", "eval",
+            "local p = hl.get_cursor_pos(); if p then hl.dispatch(hl.dsp.cursor.move({ x = p.x, y = p.y })) end"]
+        }
+
+        function nudgePointer(reason) {
+          root.log(screenName + " pointer nudge: " + reason)
+          if (!pointerNudge.running) pointerNudge.running = true
+        }
+
+        // A closed popout's full-screen layer stays mapped, taking the pointer,
+        // while its card fades out. Hold the bar until it is gone, then nudge.
+        Timer {
+          id: popoutGrace
+          interval: Style.duration(120) + 80
+          onTriggered: {
+            if (peek.revealed && peek.engaged && !barHover.hovered) peek.nudgePointer("popout closed")
+          }
+        }
+
+        onPopoutHereChanged: {
+          if (popoutHere) popoutGrace.stop()
+          else if (revealed && engaged) popoutGrace.restart()
+        }
         onHeldChanged: {
           if (!root.debug) return
           root.log(screenName + " held=" + held

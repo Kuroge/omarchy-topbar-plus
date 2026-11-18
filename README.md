@@ -78,6 +78,14 @@ screen, so the invisible strip cannot take that window's clicks. While peeking
 over a fullscreen window, the plugin gives the visible strip its input back and
 restores the native empty region once the bar has slid out.
 
+Hyprland tells a surface that moved under a resting pointer only on the next
+pointer motion. Two cases would otherwise make the bar slide out and straight
+back in: leaving the edge before the slide-in ends, and closing a popout whose
+full-screen layer keeps the pointer while it fades out. The bar is held while
+sliding in and while a closed popout fades. Afterwards, if the bar still has not
+seen the pointer, the plugin runs `hyprctl eval` once to warp the pointer onto
+its own position, so Hyprland picks the surface under it again.
+
 Once the pointer enters the bar below the trigger, the trigger releases input.
 Popouts hold the bar until dismissed so you can move into them without losing
 their anchor.

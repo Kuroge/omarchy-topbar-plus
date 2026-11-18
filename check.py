@@ -170,6 +170,72 @@ def check_fullscreen(monitor, pointer, processes):
     print(f"PASS {name}: fullscreen peek takes input, tray works, input returns on hide")
 
 
+def click(pointer, button=ecodes.BTN_LEFT):
+    pointer.write(ecodes.EV_KEY, button, 1)
+    pointer.syn()
+    pointer.write(ecodes.EV_KEY, button, 0)
+    pointer.syn()
+
+
+def screen_panel(name):
+    return lambda s: next(p for p in s["screens"] if p["name"] == name)
+
+
+def rest_hidden(monitor, pointer):
+    panel = screen_panel(monitor["name"])
+    move(monitor["x"] + 100, monitor["y"] + 200, pointer)
+    wait_for(lambda s: not panel(s)["revealed"] and not panel(s)["engaged"])
+
+
+def check_fast_entry(monitor, pointer):
+    # Leaving the edge for the widgets before the slide-in ends must not hide
+    # the bar, even though the pointer then rests where the bar arrives.
+    name = monitor["name"]
+    panel = screen_panel(name)
+    x, y = monitor["x"] + 100, monitor["y"]
+    rest_hidden(monitor, pointer)
+    hides = panel(state())["hides"]
+    move(x, y, pointer)
+    wait_for(lambda s: panel(s)["revealed"])
+    move(x, y + 12, pointer)
+    time.sleep(0.6)
+    current = panel(state())
+    assert current["hides"] == hides and current["revealed"], ("Fast entry hid the bar", current)
+    rest_hidden(monitor, pointer)
+    print(f"PASS {name}: fast entry from the edge keeps the bar")
+
+
+def check_popout_rest(monitor, pointer):
+    # Closing a popout with the pointer resting on the bar must not make the
+    # bar slide out and straight back in.
+    name = monitor["name"]
+    panel = screen_panel(name)
+    clock = panel(state())["clock"]
+    if not clock:
+        print(f"SKIP {name}: no native clock widget")
+        return
+    x, y = monitor["x"], monitor["y"]
+    clock_x = x + round(clock["x"] + clock["w"] / 2)
+    clock_y = y + round(clock["y"] + clock["h"] / 2)
+    rest_hidden(monitor, pointer)
+    move(x + 100, y, pointer)
+    wait_for(lambda s: panel(s)["offset"] == 0 and panel(s)["revealed"])
+    wait_overlay(monitor)
+    move(clock_x, clock_y, pointer)
+    wait_for(lambda s: panel(s)["hover"]["bar"])
+    click(pointer)
+    wait_for(lambda s: panel(s)["popout"])
+    time.sleep(0.4)
+    hides = panel(state())["hides"]
+    click(pointer)
+    wait_for(lambda s: not panel(s)["popout"])
+    time.sleep(0.6)
+    current = panel(state())
+    assert current["hides"] == hides and current["revealed"], ("Closing a popout over the bar hid it", current)
+    rest_hidden(monitor, pointer)
+    print(f"PASS {name}: closing a popout over the bar keeps it steady")
+
+
 def check_tray(monitor, pointer):
     def panel(s):
         return next(p for p in s["screens"] if p["name"] == monitor["name"])
@@ -296,6 +362,10 @@ def check(monitor_name=None):
             assert_parked(monitor)
             assert geometry() == before, "Hiding changed client geometry or reserved space"
             print(f"PASS {name}: edge, widget hover, overlay, hide, native park, unchanged geometry")
+
+        for monitor in monitors:
+            check_fast_entry(monitor, pointer)
+            check_popout_rest(monitor, pointer)
 
         for monitor in monitors:
             check_fullscreen(monitor, pointer, processes)
