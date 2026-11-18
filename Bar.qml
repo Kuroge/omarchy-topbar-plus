@@ -121,6 +121,7 @@ Native.Bar {
           held: p.held, offset: p.offset, hover: p.hoverState,
           engaged: p.engaged, thickness: p.thickness, margin: p.modelData.margins.top,
           underFullscreen: p.modelData.underFullscreen === true, fullscreenInput: p.fullscreenInput,
+          exclusionMode: root.exclusionName(p.modelData.exclusionMode),
           popout: root.activePopout !== null && root.targetBelongsToWindow(root.activePopout, p.modelData),
           layer: root.layerName(p.modelData.WlrLayershell.layer),
           hides: p.hideCount, clock: root.moduleRect(p.modelData, "omarchy.clock"),
@@ -161,12 +162,15 @@ Native.Bar {
         property bool revealed: false
         property string revealReason: ""
         property int hideCount: 0
-        readonly property var hoverState: ({ bar: barHover.hovered, edge: edgeHover.hovered, catching: edge.catching })
+        // Hover handlers are gone first while a controller is destroyed.
+        readonly property bool barHovered: barHover ? barHover.hovered : false
+        readonly property bool edgeHovered: edgeHover ? edgeHover.hovered : false
+        readonly property var hoverState: ({ bar: barHovered, edge: edgeHovered, catching: edge ? edge.catching : false })
         readonly property bool popoutHere: root.activePopout !== null
           && root.targetBelongsToWindow(root.activePopout, modelData)
         // Sliding in, the bar is still on its way under a pointer that left the edge.
         property bool slidingIn: false
-        readonly property bool held: barHover.hovered || (edge.catching && edgeHover.hovered)
+        readonly property bool held: barHovered || (!!edge && edge.catching && edgeHovered)
           || popoutHere || slidingIn || popoutGrace.running
           || root.barDragWindow === modelData || root.barMoveWindow === modelData
         readonly property int thickness: modelData && "thickness" in modelData ? modelData.thickness : root.barSize
@@ -197,7 +201,7 @@ Native.Bar {
         function settle() {
           slidingIn = false
           if (!revealed) engaged = false
-          else if (!barHover.hovered && !edgeHover.hovered) nudgePointer("slide-in ended")
+          else if (!barHovered && !edgeHovered) nudgePointer("slide-in ended")
         }
 
         function park() {
@@ -241,7 +245,7 @@ Native.Bar {
           id: popoutGrace
           interval: Style.duration(120) + 80
           onTriggered: {
-            if (peek.revealed && peek.engaged && !barHover.hovered) peek.nudgePointer("popout closed")
+            if (peek.revealed && peek.engaged && !peek.barHovered) peek.nudgePointer("popout closed")
           }
         }
 
@@ -306,6 +310,17 @@ Native.Bar {
           property: "layer"
           value: WlrLayer.Overlay
           when: peek.ready && peek.enabledHere && root.barHidden && peek.engaged
+          restoreMode: Binding.RestoreBindingOrValue
+        }
+
+        // A hidden bar reserves no space. A panel recreated for a monitor that
+        // reconnected can keep the normal exclusion mode while hidden, which
+        // pushes tiled windows down whenever the bar peeks.
+        Binding {
+          target: peek.modelData
+          property: "exclusionMode"
+          value: ExclusionMode.Ignore
+          when: peek.ready && peek.enabledHere && root.barHidden
           restoreMode: Binding.RestoreBindingOrValue
         }
 
@@ -378,7 +393,7 @@ Native.Bar {
 
         PanelWindow {
           id: edge
-          readonly property bool catching: visible && (!peek.revealed || !barHover.hovered)
+          readonly property bool catching: visible && (!peek.revealed || !peek.barHovered)
           onCatchingChanged: root.log(peek.screenName + " edge catching=" + catching)
           onVisibleChanged: root.log(peek.screenName + " edge visible=" + visible)
           screen: peek.modelData.screen

@@ -81,6 +81,42 @@ def wait_overlay(monitor):
                           run("hyprctl", "cursorpos", "-j")))
 
 
+def reconnect(name):
+    # Turning the outputs off is what the idle daemon does. Some monitors, like
+    # an OLED that drops off DisplayPort, disconnect and come back as new outputs.
+    def present():
+        return any(m["name"] == name for m in json.loads(run("hyprctl", "monitors", "-j")))
+
+    assert present(), f"Monitor not found: {name}"
+    dispatch('hl.dsp.dpms({ action = "disable" })')
+    try:
+        # A short blank does not let such a monitor reach the standby that drops it.
+        time.sleep(20)
+    finally:
+        dispatch('hl.dsp.dpms({ action = "enable" })')
+    # Such a monitor drops off as it wakes up; wait for that, then for its return.
+    dropped = False
+    deadline = time.monotonic() + 8
+    while time.monotonic() < deadline and not dropped:
+        dropped = not present()
+        time.sleep(0.1)
+    deadline = time.monotonic() + 30
+    while not present() and time.monotonic() < deadline:
+        time.sleep(0.2)
+    assert present(), f"{name} did not come back"
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        try:
+            if any(p["name"] == name for p in state()["screens"]):
+                break
+        except (subprocess.CalledProcessError, json.JSONDecodeError):
+            pass
+        time.sleep(0.2)
+    time.sleep(3)
+    assert dropped, f"{name} did not disconnect while the outputs were off"
+    print(f"RECONNECTED {name}: outputs off and on again")
+
+
 def close_popouts():
     # Toggling the clock closes it, or switches any other popout, including
     # tray management, to the clock so the next toggle closes it.
@@ -441,9 +477,14 @@ def check(monitor_name=None):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--monitor", help="check only this output, for mixed-DPI testing")
+    parser.add_argument("--reconnect", metavar="MONITOR",
+                        help="turn the outputs off and on first, then check this output")
     parser.add_argument("--appearance", action="store_true",
                         help="also check every bar background with desktop background enabled/disabled")
     args = parser.parse_args()
+    if args.reconnect:
+        reconnect(args.reconnect)
+        args.monitor = args.reconnect
     if not args.appearance:
         check(args.monitor)
     else:

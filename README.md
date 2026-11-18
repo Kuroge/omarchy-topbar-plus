@@ -69,7 +69,10 @@ your windows. On reveal it takes over the panel's top margin and layer: it moves
 the bar to one bar thickness above the edge, promotes it to the overlay layer
 and slides it in. When the bar has slid out, it hands margin and layer back to
 the native bar. The stock bar keeps `ExclusionMode.Ignore` because its
-`barHidden` state stays true, so no space is reserved. No polling process,
+`barHidden` state stays true, so no space is reserved. A panel recreated for a
+monitor that reconnects, such as an OLED that drops off DisplayPort when it
+wakes up, can keep the normal exclusion mode while hidden; the plugin holds it
+at `ExclusionMode.Ignore` while the bar is hidden. No polling process,
 extra daemon, copied widget implementation, packaged-file edit, or Hyprland
 rule is needed.
 
@@ -110,6 +113,7 @@ fullscreen and exclusion state, and screens being added or removed.
 omarchy plugin validate .
 python check.py
 python check.py --monitor DP-1
+python check.py --reconnect DP-2
 python check.py --appearance
 ```
 
@@ -133,7 +137,10 @@ Afterwards it closes the check windows, refocuses your window, closes any
 popout and restores the pointer and the hidden preference; each cleanup step
 runs even if another fails.
 
-`--monitor` checks a single output, for mixed-DPI testing. `--appearance`
+`--monitor` checks a single output, for mixed-DPI testing. `--reconnect`
+turns the outputs off for 20 seconds, as an idle daemon would, then checks that
+output once it has disconnected and come back; it fails if the output never
+disconnects. `--appearance`
 repeats the check with every bar background (`opaque`, `glassy`, `none`) with
 the desktop wallpaper enabled and disabled, then restores both settings.
 Changing the background reloads Hyprland when the glassy blur toggles.
