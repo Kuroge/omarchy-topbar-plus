@@ -105,6 +105,7 @@ Native.Bar {
           name: p.modelData.screen.name, revealed: p.revealed,
           held: p.held, offset: p.offset, hover: p.hoverState,
           engaged: p.engaged, thickness: p.thickness, margin: p.modelData.margins.top,
+          underFullscreen: p.modelData.underFullscreen === true, fullscreenInput: p.fullscreenInput,
           popout: root.activePopout !== null && root.targetBelongsToWindow(root.activePopout, p.modelData),
           layer: root.layerName(p.modelData.WlrLayershell.layer),
           tray: root.trayState(p.modelData)
@@ -240,6 +241,27 @@ Native.Bar {
           property: "layer"
           value: WlrLayer.Overlay
           when: peek.ready && peek.enabledHere && root.barHidden && peek.engaged
+          restoreMode: Binding.RestoreBindingOrValue
+        }
+
+        // Under a fullscreen window the native bar takes no input, so its
+        // invisible strip cannot steal clicks from the window. While peeking it
+        // is visible on the overlay layer, so give the strip its input back.
+        readonly property bool fullscreenInput: ready && enabledHere && root.barHidden && engaged
+          && modelData.underFullscreen === true && modelData.dragActive !== true
+        onFullscreenInputChanged: root.log(screenName + " mask=" + (fullscreenInput ? "peek" : "native"))
+
+        Region {
+          id: peekInputRegion
+          width: peek.modelData ? peek.modelData.width : 0
+          height: peek.thickness
+        }
+
+        Binding {
+          target: peek.modelData
+          property: "mask"
+          value: peekInputRegion
+          when: peek.fullscreenInput
           restoreMode: Binding.RestoreBindingOrValue
         }
 
