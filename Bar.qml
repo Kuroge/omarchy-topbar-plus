@@ -6,6 +6,7 @@ import Quickshell.Wayland
 import qs.Commons
 import qs.plugins.bar as Native
 import qs.Ui
+import "PeekModel.js" as PeekModel
 
 // Inherit the installed bar: widgets, theme, popouts, IPC and hidden-state IO
 // stay Omarchy-owned. Only the top-edge window placement changes.
@@ -28,14 +29,6 @@ Native.Bar {
 
   function log(message) {
     if (debug) console.log("[topbar-plus] " + message)
-  }
-
-  function layerName(layer) {
-    return ["background", "bottom", "top", "overlay"][layer] ?? String(layer)
-  }
-
-  function exclusionName(mode) {
-    return ["normal", "ignore", "auto"][mode] ?? String(mode)
   }
 
   function screenNames(windows) {
@@ -66,12 +59,6 @@ Native.Bar {
   property var suppressedWorkspaces: []
   property bool clientsQueryPending: false
 
-  function suppressesPeek(client) {
-    if (!client || !client.workspace || !(Number(client.fullscreen) > 0)) return false
-    // Tags set by a window rule carry a trailing asterisk.
-    return Array.from(client.tags || []).some(tag => tag === peekSuppressingTag || tag === peekSuppressingTag + "*")
-  }
-
   // Ask Hyprland itself. Quickshell's toplevel list never drops a window whose
   // refresh answer arrives after it closed, so a closed fullscreen window can
   // linger there with its old state until the shell restarts.
@@ -87,9 +74,8 @@ Native.Bar {
       waitForEnd: true
       onStreamFinished: {
         try {
-          const ids = JSON.parse(text).filter(c => root.suppressesPeek(c)).map(c => c.workspace.id)
-          ids.sort((a, b) => a - b)
-          if (JSON.stringify(ids) !== JSON.stringify(root.suppressedWorkspaces)) {
+          const ids = PeekModel.suppressedWorkspaces(JSON.parse(text), root.peekSuppressingTag)
+          if (!PeekModel.sameIds(ids, root.suppressedWorkspaces)) {
             root.suppressedWorkspaces = ids
             root.log("suppressed workspaces: [" + ids.join(", ") + "]")
           }
@@ -180,9 +166,9 @@ Native.Bar {
           engaged: p.engaged, thickness: p.thickness, margin: p.modelData.margins.top,
           underFullscreen: p.modelData.underFullscreen === true, fullscreenInput: p.fullscreenInput,
           suppressed: p.suppressed,
-          exclusionMode: root.exclusionName(p.modelData.exclusionMode),
+          exclusionMode: PeekModel.exclusionName(p.modelData.exclusionMode),
           popout: root.activePopout !== null && root.targetBelongsToWindow(root.activePopout, p.modelData),
-          layer: root.layerName(p.modelData.WlrLayershell.layer),
+          layer: PeekModel.layerName(p.modelData.WlrLayershell.layer),
           hides: p.hideCount, clock: root.moduleRect(p.modelData, "omarchy.clock"),
           tray: root.trayState(p.modelData)
         })) })
@@ -361,14 +347,14 @@ Native.Bar {
           enabled: root.debug
           ignoreUnknownSignals: true
           function onUnderFullscreenChanged() { root.log(peek.screenName + " underFullscreen=" + peek.modelData.underFullscreen) }
-          function onExclusionModeChanged() { root.log(peek.screenName + " exclusionMode=" + root.exclusionName(peek.modelData.exclusionMode)) }
+          function onExclusionModeChanged() { root.log(peek.screenName + " exclusionMode=" + PeekModel.exclusionName(peek.modelData.exclusionMode)) }
         }
 
         Connections {
           target: peek.modelData ? peek.modelData.WlrLayershell : null
           enabled: root.debug
           ignoreUnknownSignals: true
-          function onLayerChanged() { root.log(peek.screenName + " layer=" + root.layerName(peek.modelData.WlrLayershell.layer)) }
+          function onLayerChanged() { root.log(peek.screenName + " layer=" + PeekModel.layerName(peek.modelData.WlrLayershell.layer)) }
         }
 
         Binding {
@@ -446,10 +432,7 @@ Native.Bar {
             onStreamFinished: {
               let inside = "?"
               try {
-                const p = JSON.parse(text)
-                const screen = peek.modelData.screen
-                inside = p.x >= screen.x && p.x < screen.x + screen.width
-                  && p.y >= screen.y && p.y < screen.y + peek.thickness + Math.round(peek.offset)
+                inside = PeekModel.pointerOnBar(JSON.parse(text), peek.modelData.screen, peek.thickness, peek.offset)
               } catch (error) {}
               root.log(peek.screenName + " bar leave: cursor=" + text.replace(/\s+/g, "") + " insideBar=" + inside
                 + " offset=" + Math.round(peek.offset) + " tooltip=" + root.tooltipShown

@@ -21,8 +21,9 @@ Tested on:
 | Hyprland | 0.56.2 |
 | Quickshell | 0.3.2 |
 
-There are no extra runtime dependencies. The optional live regression check
-uses Python 3 and `python-evdev` with access to `/dev/uinput`.
+There are no extra runtime dependencies. The optional unit tests use Node.js,
+and the optional live regression check uses Python 3 and `python-evdev` with
+access to `/dev/uinput`.
 
 ## Install
 
@@ -137,11 +138,16 @@ fullscreen and exclusion state, and screens being added or removed.
 
 ```sh
 omarchy plugin validate .
+node --test tests/
 python check.py
 python check.py --monitor DP-1
 python check.py --reconnect DP-2
 python check.py --appearance
 ```
+
+`node --test tests/` runs the unit tests of `PeekModel.js`, the pure logic
+`Bar.qml` imports: which windows suppress the peek and where the pointer lies.
+They need no session and finish in milliseconds.
 
 Run the check from an active Hyprland session with Top Bar Plus selected and
 the bar at the top. Install the check dependency with
@@ -172,8 +178,8 @@ runs even if another fails.
 `--monitor` checks a single output, for mixed-DPI testing. `--reconnect`
 turns the outputs off for 20 seconds, as an idle daemon would, then checks that
 output once it has disconnected and come back; it fails if the output never
-disconnects. `--appearance`
-repeats the check with every bar background (`opaque`, `glassy`, `none`) with
+disconnects. It keeps a tagged fullscreen window open across the reconnect and
+compares the suppression with Hyprland afterwards. `--appearance` repeats the check with every bar background (`opaque`, `glassy`, `none`) with
 the desktop wallpaper enabled and disabled, then restores both settings.
 Changing the background reloads Hyprland when the glassy blur toggles.
 
@@ -181,8 +187,8 @@ When working on a local copy, install it and restart the shell, because plugin
 hot-reload can retain cached QML:
 
 ```sh
-rsync -a --delete-excluded --include=manifest.json --include=Bar.qml --include=LICENSE \
-  --exclude='*' ./ ~/.config/omarchy/plugins/io.github.kuroge.topbar-plus/
+rsync -a --delete-excluded --include=manifest.json --include=Bar.qml --include=PeekModel.js \
+  --include=LICENSE --exclude='*' ./ ~/.config/omarchy/plugins/io.github.kuroge.topbar-plus/
 omarchy restart shell
 ```
 
