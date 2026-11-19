@@ -6,12 +6,17 @@ the bar, and restores all of it afterwards.
 """
 import argparse
 import json
+import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import time
 
-from evdev import UInput, ecodes
+try:
+    from evdev import UInput, ecodes
+except ImportError:
+    sys.exit("python-evdev is missing. Install it with: omarchy pkg add python-evdev")
 
 BAR_NAMESPACE = "omarchy-bar"
 EDGE_NAMESPACE = "omarchy-topbar-plus-edge"
@@ -515,8 +520,33 @@ GLOBAL_CHECKS = {"clock": check_clock, "pinned": check_pinned}
 CHECK_NAMES = [*SCREEN_CHECKS, *GLOBAL_CHECKS]
 
 
+def preflight():
+    # Fail early, with the fix, on what the checks need.
+    problems = []
+    if not os.access("/dev/uinput", os.W_OK):
+        problems.append("Cannot write /dev/uinput, needed for the test pointer. Grant access until the "
+                        "next reboot with: sudo setfacl -m u:$USER:rw /dev/uinput")
+    if not shutil.which("foot"):
+        problems.append("foot is missing, needed for the fullscreen windows: omarchy pkg add foot")
+    try:
+        lua = run("hyprctl", "eval", "return")
+    except (OSError, subprocess.CalledProcessError) as error:
+        lua = str(error)
+    if lua != "ok":
+        problems.append(f"hyprctl eval does not run Lua ({lua!r}). The check needs Hyprland 0.56 or newer.")
+    try:
+        position = state()["position"]
+    except (OSError, subprocess.CalledProcessError, json.JSONDecodeError, KeyError):
+        problems.append("Top Bar Plus does not answer `omarchy shell topbar-plus status`. Select it with: "
+                        "omarchy bar use io.github.kuroge.topbar-plus")
+    else:
+        if position != "top":
+            problems.append(f"The bar is at the {position}; Top Bar Plus only peeks a top bar. Move it to the top.")
+    if problems:
+        sys.exit("Cannot run the check:\n- " + "\n- ".join(problems))
+
+
 def check(monitor_name=None, only=None, repeat=1):
-    assert state()["position"] == "top", "Set the bar to top before running"
     was_hidden = BAR_OFF_FLAG.exists()
     cursor = hypr("cursorpos")
     focused = hypr("activewindow")
@@ -638,6 +668,7 @@ if __name__ == "__main__":
     parser.add_argument("--repeat", type=int, default=1, metavar="N",
                         help="run the selected checks N times, to catch intermittent failures")
     args = parser.parse_args()
+    preflight()
     if args.reconnect:
         check_reconnect(args.reconnect)
         args.monitor = args.reconnect

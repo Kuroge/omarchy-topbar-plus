@@ -22,8 +22,8 @@ Tested on:
 | Quickshell | 0.3.2 |
 
 There are no extra runtime dependencies. The optional unit tests use Node.js,
-and the optional live regression check uses Python 3 and `python-evdev` with
-access to `/dev/uinput`.
+and the optional live regression check uses Python 3, `python-evdev` and
+`foot`, with access to `/dev/uinput`.
 
 ## Install
 
@@ -159,8 +159,9 @@ the bar at the top. Install the check dependency with
 to `/dev/uinput` for its temporary test pointer, for example with
 `sudo setfacl -m u:$USER:rw /dev/uinput`, which lasts until the next reboot.
 Compositor pointer warps alone do not deliver motion within a surface, so
-interaction checks use actual input events. Leave the pointer idle during the
-check: it stops when the pointer moves.
+interaction checks use actual input events. The check verifies all of this
+first and stops with the fix for whatever is missing. Leave the pointer idle
+during the check: it stops when the pointer moves.
 
 The checks run in this order; `--only` takes their names:
 
