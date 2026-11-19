@@ -71,9 +71,9 @@ peeks as usual.
   details**, not a promised stable Omarchy API. Omarchy updates may require a
   plugin update.
 - Hyprland sends no event when a tag changes. A tag added by hand to a window
-  that is already fullscreen takes effect at the next fullscreen change,
-  window opening or workspace switch. Tags set by a window rule apply when the
-  window opens.
+  that is already fullscreen takes effect at the next window event, such as a
+  fullscreen change, a window opening or closing, or a workspace switch. Tags
+  set by a window rule apply when the window opens.
 
 ## How it works
 
@@ -108,6 +108,12 @@ full-screen layer keeps the pointer while it fades out. The bar is held while
 sliding in and while a closed popout fades. Afterwards, if the bar still has not
 seen the pointer, the plugin runs `hyprctl eval` once to warp the pointer onto
 its own position, so Hyprland picks the surface under it again.
+
+To find tagged fullscreen windows the plugin runs `hyprctl clients -j` when
+Hyprland reports a window or workspace event, instead of reading Quickshell's
+window list. That list never drops a window whose refresh answer arrives after
+it closed, so a client that leaves fullscreen right before closing can linger
+there as fullscreen until the shell restarts.
 
 Once the pointer enters the bar below the trigger, the trigger releases input.
 Popouts hold the bar until dismissed so you can move into them without losing
@@ -155,7 +161,10 @@ drawer items. On each screen it also opens a temporary `foot` window, makes it
 fullscreen and checks that the peeking bar takes input there and hands it back.
 It repeats that with the window tagged `no-bar-peek`, fullscreen and maximized,
 and checks that the edge neither reveals the bar nor takes the pointer, and that
-a peeking bar slides out when a tagged window goes fullscreen.
+a peeking bar slides out when a tagged window goes fullscreen. It also leaves
+fullscreen and closes a tagged window straight away several times, as a remote
+desktop client does, and checks that the edge reveals the bar again and that
+the suppression matches what Hyprland reports.
 Afterwards it closes the check windows, refocuses your window, closes any
 popout and restores the pointer and the hidden preference; each cleanup step
 runs even if another fails.

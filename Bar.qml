@@ -55,32 +55,63 @@ Native.Bar {
   // or maximized, so the bar leaves that edge to them.
   readonly property string peekSuppressingTag: "no-bar-peek"
 
-  function suppressesPeek(toplevel) {
-    const ipc = toplevel ? toplevel.lastIpcObject : null
-    if (!ipc || !(Number(ipc.fullscreen) > 0)) return false
+  // Workspaces holding a fullscreen or maximized window with that tag.
+  property var suppressedWorkspaces: []
+  property bool clientsQueryPending: false
+
+  function suppressesPeek(client) {
+    if (!client || !client.workspace || !(Number(client.fullscreen) > 0)) return false
     // Tags set by a window rule carry a trailing asterisk.
-    return Array.from(ipc.tags || []).some(tag => tag === peekSuppressingTag || tag === peekSuppressingTag + "*")
+    return Array.from(client.tags || []).some(tag => tag === peekSuppressingTag || tag === peekSuppressingTag + "*")
   }
 
-  function peekSuppressedOn(workspace) {
-    if (!workspace) return false
-    return Hyprland.toplevels.values.some(toplevel => !!toplevel && !!toplevel.workspace
-      && toplevel.workspace.id === workspace.id && suppressesPeek(toplevel))
+  // Ask Hyprland itself. Quickshell's toplevel list never drops a window whose
+  // refresh answer arrives after it closed, so a closed fullscreen window can
+  // linger there with its old state until the shell restarts.
+  function queryClients() {
+    if (clientsQuery.running) clientsQueryPending = true
+    else clientsQuery.running = true
   }
 
-  // Hyprland's window list does not follow tags on its own. The native bar
-  // refreshes it on fullscreen changes; also refresh it when a window opens,
-  // a workspace becomes active or a monitor returns.
+  Process {
+    id: clientsQuery
+    command: ["hyprctl", "clients", "-j"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        try {
+          const ids = JSON.parse(text).filter(c => root.suppressesPeek(c)).map(c => c.workspace.id)
+          ids.sort((a, b) => a - b)
+          if (JSON.stringify(ids) !== JSON.stringify(root.suppressedWorkspaces)) {
+            root.suppressedWorkspaces = ids
+            root.log("suppressed workspaces: [" + ids.join(", ") + "]")
+          }
+        } catch (error) {
+          root.log("clients query failed: " + error)
+        }
+      }
+    }
+    onExited: (code, status) => {
+      if (!root.clientsQueryPending) return
+      root.clientsQueryPending = false
+      Qt.callLater(root.queryClients)
+    }
+  }
+
   Connections {
     target: Hyprland
     function onRawEvent(event) {
       const name = event ? String(event.name) : ""
-      if (name === "openwindow" || name === "workspacev2" || name === "monitoraddedv2")
-        Hyprland.refreshToplevels()
+      if (["fullscreen", "openwindow", "closewindow", "movewindowv2", "workspacev2",
+           "monitoraddedv2", "configreloaded"].includes(name))
+        root.queryClients()
     }
   }
 
-  Component.onCompleted: Qt.callLater(findBarPanels)
+  Component.onCompleted: {
+    Qt.callLater(findBarPanels)
+    queryClients()
+  }
   Connections {
     target: Quickshell
     function onScreensChanged() {
@@ -145,6 +176,7 @@ Native.Bar {
     target: "topbar-plus"
     function status(): string {
       return JSON.stringify({ hidden: root.barHidden, position: root.position, debug: root.debug,
+        suppressedWorkspaces: root.suppressedWorkspaces,
         popout: root.activePopout !== null,
         screens: peekControllers.instances.map(p => ({
           name: p.modelData.screen.name, revealed: p.revealed,
@@ -206,7 +238,8 @@ Native.Bar {
           || root.barDragWindow === modelData || root.barMoveWindow === modelData
         readonly property bool suppressed: {
           const monitor = modelData && modelData.screen ? Hyprland.monitorFor(modelData.screen) : null
-          return root.peekSuppressedOn(monitor ? monitor.activeWorkspace : null)
+          const workspace = monitor ? monitor.activeWorkspace : null
+          return !!workspace && root.suppressedWorkspaces.includes(workspace.id)
         }
         onSuppressedChanged: {
           root.log(screenName + " suppressed=" + suppressed)

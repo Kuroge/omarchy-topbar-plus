@@ -184,9 +184,24 @@ def open_check_window(monitor, processes, tag=None):
     return window
 
 
-def set_fullscreen(window, mode):
-    dispatch(f'hl.dsp.window.fullscreen({{ mode = "{mode}", action = "set", '
+def set_fullscreen(window, mode, action="set"):
+    dispatch(f'hl.dsp.window.fullscreen({{ mode = "{mode}", action = "{action}", '
              f'window = "address:{window["address"]}" }})')
+
+
+def expected_suppressed():
+    # Hyprland's own view: screens whose active workspace holds a tagged
+    # fullscreen or maximized window.
+    workspaces = {c["workspace"]["id"] for c in json.loads(run("hyprctl", "clients", "-j"))
+                  if c["fullscreen"] > 0 and any(t.rstrip("*") == PEEK_SUPPRESSING_TAG for t in c["tags"])}
+    return {m["name"]: m["activeWorkspace"]["id"] in workspaces
+            for m in json.loads(run("hyprctl", "monitors", "-j"))}
+
+
+def assert_suppression_matches_hyprland():
+    expected = expected_suppressed()
+    current = wait_for(lambda s: all(p["suppressed"] == expected[p["name"]] for p in s["screens"]))
+    return current
 
 
 def check_fullscreen(monitor, pointer, processes):
@@ -244,6 +259,29 @@ def check_suppressed(monitor, pointer, processes, mode):
     close_check_windows(processes)
     wait_for(lambda s: not panel(s)["suppressed"])
     print(f"PASS {name}: tagged {mode} window keeps the edge, no peek, edge takes no pointer")
+
+
+def check_suppressed_close(monitor, pointer, processes, rounds=3):
+    # A remote desktop client leaves fullscreen right before it closes. The
+    # suppression must follow Hyprland, not a window list that kept the closed
+    # window, and the edge must reveal the bar again.
+    name = monitor["name"]
+    x, y = monitor["x"] + 100, monitor["y"]
+    panel = screen_panel(name)
+
+    rest_hidden(monitor, pointer)
+    for _ in range(rounds):
+        window = open_check_window(monitor, processes, PEEK_SUPPRESSING_TAG)
+        set_fullscreen(window, "fullscreen")
+        wait_for(lambda s: panel(s)["suppressed"])
+        set_fullscreen(window, "fullscreen", "unset")
+        close_check_windows(processes)
+        wait_for(lambda s: not panel(s)["suppressed"] and panel(s)["hover"]["catching"])
+        assert_suppression_matches_hyprland()
+    move(x, y, pointer)
+    wait_for(lambda s: panel(s)["offset"] == 0 and panel(s)["revealed"])
+    rest_hidden(monitor, pointer)
+    print(f"PASS {name}: closing a tagged window right after fullscreen ({rounds}x) gives the edge back")
 
 
 def check_suppressed_while_peeking(monitor, pointer, processes):
@@ -496,6 +534,8 @@ def check(monitor_name=None):
             for mode in ["fullscreen", "maximized"]:
                 check_suppressed(monitor, pointer, processes, mode)
             check_suppressed_while_peeking(monitor, pointer, processes)
+            check_suppressed_close(monitor, pointer, processes)
+        assert_suppression_matches_hyprland()
 
         if not monitor_name:
             # Every screen's clock registers omarchy.clock and only the first
