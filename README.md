@@ -143,6 +143,7 @@ python check.py
 python check.py --monitor DP-1
 python check.py --reconnect DP-2
 python check.py --appearance
+python check.py --only fullscreen,suppressed --repeat 3
 ```
 
 `node --test tests/` runs the unit tests of `PeekModel.js`, the pure logic
@@ -175,6 +176,8 @@ Afterwards it closes the check windows, refocuses your window, closes any
 popout and restores the pointer and the hidden preference; each cleanup step
 runs even if another fails.
 
+`--only` runs some of the checks, by name (`python check.py --help` lists
+them), and `--repeat` runs them several times to catch intermittent failures.
 `--monitor` checks a single output, for mixed-DPI testing. `--reconnect`
 turns the outputs off for 20 seconds, as an idle daemon would, then checks that
 output once it has disconnected and come back; it fails if the output never
