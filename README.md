@@ -72,16 +72,19 @@ peeks as usual.
   details**, not a promised stable Omarchy API. Omarchy updates may require a
   plugin update.
 - Hyprland sends no event when a tag changes. A tag added by hand to a window
-  that is already fullscreen takes effect at the next window event, such as a
-  fullscreen change, a window opening or closing, or a workspace switch. Tags
-  set by a window rule apply when the window opens.
+  that is already fullscreen takes effect at the next window event: a
+  fullscreen change, or a window opening, closing or moving. Tags set by a
+  window rule apply when the window opens.
 
 ## How it works
 
 `Bar.qml` inherits `qs.plugins.bar.Bar`. It finds that bar's native panel
 windows and adds, per screen, a two-pixel Wayland edge trigger on the overlay
 layer plus a passive hover observer on the widgets' shared parent, so native
-hover handlers, including the tray drawer, keep receiving pointer events.
+hover handlers, including the tray drawer, keep receiving pointer events. Like
+the native bar, it keeps its parts as inline components: `PeekController` per
+panel, `EdgeTrigger` for the strip and `LeaveProbe` for debug logging. Its pure
+logic lives in `PeekModel.js`, which the unit tests load as well.
 
 In Omarchy 4.5 each native panel is a transparent surface as tall as its screen
 that parks a full screen height above it while hidden. At rest the plugin leaves
@@ -111,8 +114,7 @@ seen the pointer, the plugin runs `hyprctl eval` once to warp the pointer onto
 its own position, so Hyprland picks the surface under it again.
 
 To find tagged fullscreen windows the plugin runs `hyprctl clients -j` when
-Hyprland reports a window or workspace event, instead of reading Quickshell's
-window list. That list never drops a window whose refresh answer arrives after
+Hyprland reports a window event, instead of reading Quickshell's window list. That list never drops a window whose refresh answer arrives after
 it closed, so a client that leaves fullscreen right before closing can linger
 there as fullscreen until the shell restarts.
 
@@ -132,7 +134,8 @@ omarchy shell topbar-plus setDebug false
 `status` prints the per-screen state as JSON. Debug logging is off by default
 and resets when the shell restarts. While on, it logs reveals and hides with
 their cause, hold changes, margin and layer hand-overs, the native panel's
-fullscreen and exclusion state, and screens being added or removed.
+fullscreen and exclusion state, the suppressed workspaces, where the pointer
+really is when the bar reports a leave, and screens being added or removed.
 
 ## Verify or develop
 
@@ -153,38 +156,42 @@ They need no session and finish in milliseconds.
 Run the check from an active Hyprland session with Top Bar Plus selected and
 the bar at the top. Install the check dependency with
 `omarchy pkg add python-evdev` if needed. Your session must have write access
-to `/dev/uinput` for its temporary test pointer. Compositor pointer warps alone
-do not deliver motion within a surface, so interaction checks use actual input
-events. Leave the pointer idle during the check: it stops when the pointer
-moves.
+to `/dev/uinput` for its temporary test pointer, for example with
+`sudo setfacl -m u:$USER:rw /dev/uinput`, which lasts until the next reboot.
+Compositor pointer warps alone do not deliver motion within a surface, so
+interaction checks use actual input events. Leave the pointer idle during the
+check: it stops when the pointer moves.
 
-It moves the pointer, opens and closes the clock and tray management popouts,
-and toggles the bar. It checks edge reveal, widget hover, overlay placement,
-the native park at rest, unchanged window geometry and monitor reserved space,
-popup retention, hide, and normal pinned visibility. It also checks native tray
-expansion, movement across app icons, right-click management, and collapse in
-both hidden and pinned modes. Tray checks report a skip when there are no
-drawer items. On each screen it also opens a temporary `foot` window, makes it
-fullscreen and checks that the peeking bar takes input there and hands it back.
-It repeats that with the window tagged `no-bar-peek`, fullscreen and maximized,
-and checks that the edge neither reveals the bar nor takes the pointer, and that
-a peeking bar slides out when a tagged window goes fullscreen. It also leaves
-fullscreen and closes a tagged window straight away several times, as a remote
-desktop client does, and checks that the edge reveals the bar again and that
-the suppression matches what Hyprland reports.
-Afterwards it closes the check windows, refocuses your window, closes any
-popout and restores the pointer and the hidden preference; each cleanup step
-runs even if another fails.
+The checks run in this order; `--only` takes their names:
 
-`--only` runs some of the checks, by name (`python check.py --help` lists
-them), and `--repeat` runs them several times to catch intermittent failures.
-`--monitor` checks a single output, for mixed-DPI testing. `--reconnect`
-turns the outputs off for 20 seconds, as an idle daemon would, then checks that
-output once it has disconnected and come back; it fails if the output never
-disconnects. It keeps a tagged fullscreen window open across the reconnect and
-compares the suppression with Hyprland afterwards. `--appearance` repeats the check with every bar background (`opaque`, `glassy`, `none`) with
-the desktop wallpaper enabled and disabled, then restores both settings.
-Changing the background reloads Hyprland when the glassy blur toggles.
+| Check | On each screen, with the bar hidden |
+|---|---|
+| `peek` | Edge reveal, widget hover, overlay placement and scale, re-entry near the hide timeout, tray, hide, native park, unchanged window geometry and reserved space |
+| `fast-entry` | Leaving the edge before the slide-in ends keeps the bar |
+| `edge-rest` | Resting against the top edge keeps the bar |
+| `popout-rest` | Closing a popout over the bar keeps it steady |
+| `fullscreen` | Over a temporary fullscreen `foot` window the peeking bar takes input and hands it back |
+| `suppressed` | Over a tagged fullscreen or maximized window the edge neither reveals the bar nor takes the pointer |
+| `suppressed-peeking` | A tagged window going fullscreen slides a peeking bar out |
+| `suppressed-close` | Leaving fullscreen and closing a tagged window straight away, as a remote desktop client does, gives the edge back, in step with Hyprland |
+| `clock` | The clock popup holds the bar open and releases it on close |
+| `pinned` | The normally visible bar stays pinned, and the tray works there |
+
+Tray checks report a skip when there are no drawer items. Afterwards the check
+closes its windows, refocuses your window, closes any popout and restores the
+pointer and the hidden preference; each cleanup step runs even if another
+fails.
+
+`--repeat` runs the selected checks several times, to catch intermittent
+failures. `--monitor` checks a single output, for mixed-DPI testing.
+`--reconnect` turns the outputs off for 20 seconds, as an idle daemon would,
+then checks that output once it has disconnected and come back; it fails if
+the output never disconnects. It keeps a tagged fullscreen window open across
+the reconnect and compares the suppression with Hyprland afterwards.
+`--appearance` repeats the check with every bar background (`opaque`,
+`glassy`, `none`) with the desktop wallpaper enabled and disabled, then
+restores both settings. Changing the background reloads Hyprland when the
+glassy blur toggles.
 
 When working on a local copy, install it and restart the shell, because plugin
 hot-reload can retain cached QML:
