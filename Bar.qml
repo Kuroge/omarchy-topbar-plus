@@ -19,6 +19,13 @@ Native.Bar {
 
   property bool debug: false
 
+  // Same duration and easing as Omarchy's PopupCard.
+  readonly property int slideDuration: Style.duration(140)
+  readonly property int hideDelay: 120
+  // A closed popout's full-screen layer stays mapped while its card fades out.
+  readonly property int popoutFadeGrace: Style.duration(120) + 80
+  readonly property int edgeHeight: 2
+
   function log(message) {
     if (debug) console.log("[topbar-plus] " + message)
   }
@@ -122,52 +129,40 @@ Native.Bar {
 
   Connections {
     target: root
+    enabled: root.debug
     function onBarHiddenChanged() { root.log("barHidden=" + root.barHidden) }
     function onActivePopoutChanged() { root.log("activePopout=" + (root.activePopout ? String(root.activePopout) : "none")) }
   }
 
   // Read native widget geometry and tray state for the live regression check.
-  function moduleRect(window, moduleName) {
-    function find(item) {
-      if (item.moduleName === moduleName) return item
-      for (const child of item.children || []) {
-        const found = find(child)
-        if (found) return found
-      }
-      return null
+  function findItem(item, predicate) {
+    if (predicate(item)) return item
+    for (const child of item.children || []) {
+      const found = findItem(child, predicate)
+      if (found) return found
     }
-    const item = find(window.contentItem)
-    if (!item) return null
+    return null
+  }
+
+  function rectIn(window, item) {
     const point = item.mapToItem(window.contentItem, 0, 0)
     return { x: point.x, y: point.y, w: item.width, h: item.height }
   }
 
+  function moduleRect(window, moduleName) {
+    const item = findItem(window.contentItem, i => i.moduleName === moduleName)
+    return item ? rectIn(window, item) : null
+  }
+
   function trayState(window) {
-    function find(item) {
-      if (item.moduleName === "omarchy.tray" && "drawerExtent" in item) return item
-      for (const child of item.children || []) {
-        const found = find(child)
-        if (found) return found
-      }
-      return null
-    }
-    function findChevron(item) {
-      if ("bar" in item && (item.text === "" || item.text === "")) return item
-      for (const child of item.children || []) {
-        const found = findChevron(child)
-        if (found) return found
-      }
-      return null
-    }
-    const tray = find(window.contentItem)
+    const tray = findItem(window.contentItem, i => i.moduleName === "omarchy.tray" && "drawerExtent" in i)
     if (!tray) return null
-    const point = tray.mapToItem(window.contentItem, 0, 0)
-    const chevron = findChevron(tray)
-    const chevronPoint = chevron ? chevron.mapToItem(window.contentItem, 0, 0) : null
-    return { x: point.x, y: point.y, height: tray.height,
+    const chevron = findItem(tray, i => "bar" in i && (i.text === "\uf053" || i.text === "\uf054"))
+    const rect = rectIn(window, tray)
+    return { x: rect.x, y: rect.y, height: tray.height,
       slot: tray.trayItemExtent, extent: tray.drawerExtent,
       fixedAtStart: tray.fixedAtStart,
-      chevron: chevron ? { x: chevronPoint.x, y: chevronPoint.y, w: chevron.width, h: chevron.height } : null,
+      chevron: chevron ? rectIn(window, chevron) : null,
       expanded: tray.expanded, progress: tray.revealProgress,
       manageOpen: tray.managePopupOpen }
   }
@@ -222,6 +217,9 @@ Native.Bar {
         }
         Component.onDestruction: root.log(screenName + " controller destroyed")
         readonly property bool enabledHere: root.position === "top"
+        // Active: the bar is hidden and peeks here. Owning: it is peeking now.
+        readonly property bool active: ready && enabledHere && root.barHidden
+        readonly property bool owning: active && engaged
         property bool revealed: false
         property string revealReason: ""
         property int hideCount: 0
@@ -261,7 +259,7 @@ Native.Bar {
         function slideTo(target) {
           slide.stop()
           slidingIn = target === 0
-          if (Style.duration(140) <= 0) {
+          if (root.slideDuration <= 0) {
             offset = target
             settle()
             return
@@ -293,7 +291,6 @@ Native.Bar {
           }
           slideTo(revealed ? 0 : -thickness)
         }
-        onEngagedChanged: root.log(screenName + " placement=" + (engaged ? "peek" : "native"))
 
         // Hyprland tells a surface that moved under a resting pointer, or that
         // a closed popout uncovered, only on the next motion. Warping the
@@ -311,11 +308,11 @@ Native.Bar {
           if (!pointerNudge.running) pointerNudge.running = true
         }
 
-        // A closed popout's full-screen layer stays mapped, taking the pointer,
-        // while its card fades out. Hold the bar until it is gone, then nudge.
+        // The fading popout layer takes the pointer. Hold the bar until it is
+        // gone, then nudge.
         Timer {
           id: popoutGrace
-          interval: Style.duration(120) + 80
+          interval: root.popoutFadeGrace
           onTriggered: {
             if (peek.revealed && peek.engaged && !peek.barHovered) peek.nudgePointer("popout closed")
           }
@@ -325,21 +322,12 @@ Native.Bar {
           if (popoutHere) popoutGrace.stop()
           else if (revealed && engaged) popoutGrace.restart()
         }
-        onHeldChanged: {
-          if (!root.debug) return
-          root.log(screenName + " held=" + held
-            + " bar=" + (barHover ? barHover.hovered : null)
-            + " edge=" + (edgeHover ? edgeHover.hovered : null)
-            + " catching=" + (edge ? edge.catching : null)
-            + " popout=" + (root.activePopout !== null))
-        }
 
         NumberAnimation {
           id: slide
           target: peek
           property: "offset"
-          // Same duration and easing as Omarchy's PopupCard.
-          duration: Style.duration(140)
+          duration: root.slideDuration
           easing.type: Easing.OutCubic
           onFinished: peek.settle()
         }
@@ -356,8 +344,28 @@ Native.Bar {
           }
         }
 
+        // Debug logging only.
+        Connections {
+          target: peek
+          enabled: root.debug
+          function onEngagedChanged() { root.log(peek.screenName + " placement=" + (peek.engaged ? "peek" : "native")) }
+          function onFullscreenInputChanged() { root.log(peek.screenName + " mask=" + (peek.fullscreenInput ? "peek" : "native")) }
+          function onHeldChanged() {
+            root.log(peek.screenName + " held=" + peek.held + " bar=" + peek.barHovered + " edge=" + peek.edgeHovered
+              + " catching=" + (edge ? edge.catching : null) + " popout=" + (root.activePopout !== null))
+          }
+        }
+
+        Connections {
+          target: edge
+          enabled: root.debug
+          function onCatchingChanged() { root.log(peek.screenName + " edge catching=" + edge.catching) }
+          function onVisibleChanged() { root.log(peek.screenName + " edge visible=" + edge.visible) }
+        }
+
         Connections {
           target: peek.modelData
+          enabled: root.debug
           ignoreUnknownSignals: true
           function onUnderFullscreenChanged() { root.log(peek.screenName + " underFullscreen=" + peek.modelData.underFullscreen) }
           function onExclusionModeChanged() { root.log(peek.screenName + " exclusionMode=" + root.exclusionName(peek.modelData.exclusionMode)) }
@@ -365,6 +373,7 @@ Native.Bar {
 
         Connections {
           target: peek.modelData ? peek.modelData.WlrLayershell : null
+          enabled: root.debug
           ignoreUnknownSignals: true
           function onLayerChanged() { root.log(peek.screenName + " layer=" + root.layerName(peek.modelData.WlrLayershell.layer)) }
         }
@@ -373,7 +382,7 @@ Native.Bar {
           target: peek.modelData
           property: "margins.top"
           value: Math.round(peek.offset)
-          when: peek.ready && peek.enabledHere && root.barHidden && peek.engaged
+          when: peek.owning
           restoreMode: Binding.RestoreBindingOrValue
         }
 
@@ -381,7 +390,7 @@ Native.Bar {
           target: peek.modelData.WlrLayershell
           property: "layer"
           value: WlrLayer.Overlay
-          when: peek.ready && peek.enabledHere && root.barHidden && peek.engaged
+          when: peek.owning
           restoreMode: Binding.RestoreBindingOrValue
         }
 
@@ -392,16 +401,15 @@ Native.Bar {
           target: peek.modelData
           property: "exclusionMode"
           value: ExclusionMode.Ignore
-          when: peek.ready && peek.enabledHere && root.barHidden
+          when: peek.active
           restoreMode: Binding.RestoreBindingOrValue
         }
 
         // Under a fullscreen window the native bar takes no input, so its
         // invisible strip cannot steal clicks from the window. While peeking it
         // is visible on the overlay layer, so give the strip its input back.
-        readonly property bool fullscreenInput: ready && enabledHere && root.barHidden && engaged
-          && modelData.underFullscreen === true && modelData.dragActive !== true && !suppressed
-        onFullscreenInputChanged: root.log(screenName + " mask=" + (fullscreenInput ? "peek" : "native"))
+        readonly property bool fullscreenInput: owning && !suppressed
+          && modelData.underFullscreen === true && modelData.dragActive !== true
 
         Region {
           id: peekInputRegion
@@ -458,7 +466,7 @@ Native.Bar {
         }
 
         Timer {
-          interval: 120
+          interval: root.hideDelay
           running: peek.revealed && !peek.held
           onTriggered: if (!peek.held) peek.setRevealed(false, "timer")
         }
@@ -468,17 +476,15 @@ Native.Bar {
           // While suppressed the edge stays mapped but takes no input, so the
           // pointer reaches the window's own bar whatever the overlay order.
           readonly property bool catching: visible && !peek.suppressed && (!peek.revealed || !peek.barHovered)
-          onCatchingChanged: root.log(peek.screenName + " edge catching=" + catching)
-          onVisibleChanged: root.log(peek.screenName + " edge visible=" + visible)
           screen: peek.modelData.screen
-          visible: peek.ready && peek.enabledHere && root.barHidden && !edgeRemap.remapping
+          visible: peek.active && !edgeRemap.remapping
           color: "transparent"
-          implicitHeight: 2
+          implicitHeight: root.edgeHeight
           anchors { top: true; left: true; right: true }
           exclusionMode: ExclusionMode.Ignore
           // Hand input back after the pointer enters the bar. Clearing the
           // mask at animation end alone may not generate a new pointer enter.
-          mask: Region { width: edge.catching ? edge.width : 0; height: 2 }
+          mask: Region { width: edge.catching ? edge.width : 0; height: root.edgeHeight }
           WlrLayershell.namespace: "omarchy-topbar-plus-edge"
           WlrLayershell.layer: WlrLayer.Overlay
           WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
