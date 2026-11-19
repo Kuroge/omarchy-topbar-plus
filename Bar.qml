@@ -183,295 +183,305 @@ Native.Bar {
   Variants {
     id: peekControllers
     model: root.peekWindows
+    delegate: Component { PeekController {} }
+  }
 
-    delegate: Component {
-      Item {
-        id: peek
-        required property var modelData
-        readonly property string screenName: modelData && modelData.screen ? modelData.screen.name : "?"
-        property bool ready: false
-        Component.onCompleted: {
-          Qt.callLater(() => ready = true)
-          root.log(screenName + " controller created")
-        }
-        Component.onDestruction: root.log(screenName + " controller destroyed")
-        readonly property bool enabledHere: root.position === "top"
-        // Active: the bar is hidden and peeks here. Owning: it is peeking now.
-        readonly property bool active: ready && enabledHere && root.barHidden
-        readonly property bool owning: active && engaged
-        property bool revealed: false
-        property string revealReason: ""
-        property int hideCount: 0
-        // Hover handlers are gone first while a controller is destroyed.
-        readonly property bool barHovered: barHover ? barHover.hovered : false
-        readonly property bool edgeHovered: edgeHover ? edgeHover.hovered : false
-        readonly property var hoverState: ({ bar: barHovered, edge: edgeHovered, catching: edge ? edge.catching : false })
-        readonly property bool popoutHere: root.activePopout !== null
-          && root.targetBelongsToWindow(root.activePopout, modelData)
-        // Sliding in, the bar is still on its way under a pointer that left the edge.
-        property bool slidingIn: false
-        readonly property bool held: barHovered || (!!edge && edge.catching && edgeHovered)
-          || popoutHere || slidingIn || popoutGrace.running
-          || root.barDragWindow === modelData || root.barMoveWindow === modelData
-        readonly property bool suppressed: {
-          const monitor = modelData && modelData.screen ? Hyprland.monitorFor(modelData.screen) : null
-          const workspace = monitor ? monitor.activeWorkspace : null
-          return !!workspace && root.suppressedWorkspaces.includes(workspace.id)
-        }
-        onSuppressedChanged: {
-          root.log(screenName + " suppressed=" + suppressed)
-          if (suppressed) setRevealed(false, "suppressed")
-        }
-        readonly property int thickness: modelData && "thickness" in modelData ? modelData.thickness : root.barSize
-        // While engaged this controller owns the bar's margin and layer. At rest
-        // the native BarPanel parks its full-screen surface off screen on its
-        // usual layer, so no transparent overlay stays above the windows.
-        property bool engaged: false
-        property real offset: -thickness
+  // One per native panel: peeks that panel's bar from its screen's top edge.
+  component PeekController: Item {
+    id: peek
+    required property var modelData
+    readonly property string screenName: modelData && modelData.screen ? modelData.screen.name : "?"
+    property bool ready: false
+    Component.onCompleted: {
+      Qt.callLater(() => ready = true)
+      root.log(screenName + " controller created")
+    }
+    Component.onDestruction: root.log(screenName + " controller destroyed")
+    readonly property bool enabledHere: root.position === "top"
+    // Active: the bar is hidden and peeks here. Owning: it is peeking now.
+    readonly property bool active: ready && enabledHere && root.barHidden
+    readonly property bool owning: active && engaged
+    property bool revealed: false
+    property string revealReason: ""
+    property int hideCount: 0
+    // Hover handlers are gone first while a controller is destroyed.
+    readonly property bool barHovered: barHover ? barHover.hovered : false
+    readonly property bool edgeHovered: edge ? edge.hovered : false
+    readonly property var hoverState: ({ bar: barHovered, edge: edgeHovered, catching: edge ? edge.catching : false })
+    readonly property bool popoutHere: root.activePopout !== null
+      && root.targetBelongsToWindow(root.activePopout, modelData)
+    // Sliding in, the bar is still on its way under a pointer that left the edge.
+    property bool slidingIn: false
+    readonly property bool held: barHovered || (!!edge && edge.catching && edgeHovered)
+      || popoutHere || slidingIn || popoutGrace.running
+      || root.barDragWindow === modelData || root.barMoveWindow === modelData
+    readonly property bool suppressed: {
+      const monitor = modelData && modelData.screen ? Hyprland.monitorFor(modelData.screen) : null
+      const workspace = monitor ? monitor.activeWorkspace : null
+      return !!workspace && root.suppressedWorkspaces.includes(workspace.id)
+    }
+    onSuppressedChanged: {
+      root.log(screenName + " suppressed=" + suppressed)
+      if (suppressed) setRevealed(false, "suppressed")
+    }
+    readonly property int thickness: modelData && "thickness" in modelData ? modelData.thickness : root.barSize
+    // While engaged this controller owns the bar's margin and layer. At rest
+    // the native BarPanel parks its full-screen surface off screen on its
+    // usual layer, so no transparent overlay stays above the windows.
+    property bool engaged: false
+    property real offset: -thickness
 
-        function setRevealed(value, reason) {
-          if (revealed === value) return
-          revealReason = reason
-          revealed = value
-        }
+    function setRevealed(value, reason) {
+      if (revealed === value) return
+      revealReason = reason
+      revealed = value
+    }
 
-        function slideTo(target) {
-          slide.stop()
-          slidingIn = target === 0
-          if (root.slideDuration <= 0) {
-            offset = target
-            settle()
-            return
-          }
-          slide.to = target
-          slide.start()
-        }
+    function slideTo(target) {
+      slide.stop()
+      slidingIn = target === 0
+      if (root.slideDuration <= 0) {
+        offset = target
+        settle()
+        return
+      }
+      slide.to = target
+      slide.start()
+    }
 
-        function settle() {
-          slidingIn = false
-          if (!revealed) engaged = false
-          else if (!barHovered && !edgeHovered) nudgePointer("slide-in ended")
-        }
+    function settle() {
+      slidingIn = false
+      if (!revealed) engaged = false
+      else if (!barHovered && !edgeHovered) nudgePointer("slide-in ended")
+    }
 
-        function park() {
-          slide.stop()
-          slidingIn = false
-          engaged = false
-          offset = -thickness
-        }
+    function park() {
+      slide.stop()
+      slidingIn = false
+      engaged = false
+      offset = -thickness
+    }
 
-        onRevealedChanged: {
-          root.log(screenName + " revealed=" + revealed + " reason=" + revealReason)
-          if (!revealed) hideCount++
-          if (!root.barHidden || !enabledHere) return
-          if (revealed && !engaged) {
-            offset = -thickness
-            engaged = true
-          }
-          slideTo(revealed ? 0 : -thickness)
-        }
+    onRevealedChanged: {
+      root.log(screenName + " revealed=" + revealed + " reason=" + revealReason)
+      if (!revealed) hideCount++
+      if (!root.barHidden || !enabledHere) return
+      if (revealed && !engaged) {
+        offset = -thickness
+        engaged = true
+      }
+      slideTo(revealed ? 0 : -thickness)
+    }
 
-        // Hyprland tells a surface that moved under a resting pointer, or that
-        // a closed popout uncovered, only on the next motion. Warping the
-        // pointer onto its own position makes it pick the surface again, so the
-        // bar learns it is hovered instead of hiding and bouncing back.
-        Process {
-          id: pointerNudge
-          onExited: (code, status) => root.log(peek.screenName + " nudge exited code=" + code)
-          command: ["hyprctl", "eval",
-            "local p = hl.get_cursor_pos(); if p then hl.dispatch(hl.dsp.cursor.move({ x = p.x, y = p.y })) end"]
-        }
+    // Hyprland tells a surface that moved under a resting pointer, or that
+    // a closed popout uncovered, only on the next motion. Warping the
+    // pointer onto its own position makes it pick the surface again, so the
+    // bar learns it is hovered instead of hiding and bouncing back.
+    Process {
+      id: pointerNudge
+      onExited: (code, status) => root.log(peek.screenName + " nudge exited code=" + code)
+      command: ["hyprctl", "eval",
+        "local p = hl.get_cursor_pos(); if p then hl.dispatch(hl.dsp.cursor.move({ x = p.x, y = p.y })) end"]
+    }
 
-        function nudgePointer(reason) {
-          root.log(screenName + " pointer nudge: " + reason)
-          if (!pointerNudge.running) pointerNudge.running = true
-        }
+    function nudgePointer(reason) {
+      root.log(screenName + " pointer nudge: " + reason)
+      if (!pointerNudge.running) pointerNudge.running = true
+    }
 
-        // The fading popout layer takes the pointer. Hold the bar until it is
-        // gone, then nudge.
-        Timer {
-          id: popoutGrace
-          interval: root.popoutFadeGrace
-          onTriggered: {
-            if (peek.revealed && peek.engaged && !peek.barHovered) peek.nudgePointer("popout closed")
-          }
-        }
+    // The fading popout layer takes the pointer. Hold the bar until it is
+    // gone, then nudge.
+    Timer {
+      id: popoutGrace
+      interval: root.popoutFadeGrace
+      onTriggered: {
+        if (peek.revealed && peek.engaged && !peek.barHovered) peek.nudgePointer("popout closed")
+      }
+    }
 
-        onPopoutHereChanged: {
-          if (popoutHere) popoutGrace.stop()
-          else if (revealed && engaged) popoutGrace.restart()
-        }
+    onPopoutHereChanged: {
+      if (popoutHere) popoutGrace.stop()
+      else if (revealed && engaged) popoutGrace.restart()
+    }
 
-        NumberAnimation {
-          id: slide
-          target: peek
-          property: "offset"
-          duration: root.slideDuration
-          easing.type: Easing.OutCubic
-          onFinished: peek.settle()
-        }
+    NumberAnimation {
+      id: slide
+      target: peek
+      property: "offset"
+      duration: root.slideDuration
+      easing.type: Easing.OutCubic
+      onFinished: peek.settle()
+    }
 
-        Connections {
-          target: root
-          function onBarHiddenChanged() {
-            peek.setRevealed(false, "barHidden")
-            peek.park()
-          }
-          function onPositionChanged() {
-            peek.setRevealed(false, "position")
-            peek.park()
-          }
-        }
+    Connections {
+      target: root
+      function onBarHiddenChanged() {
+        peek.setRevealed(false, "barHidden")
+        peek.park()
+      }
+      function onPositionChanged() {
+        peek.setRevealed(false, "position")
+        peek.park()
+      }
+    }
 
-        // Debug logging only.
-        Connections {
-          target: peek
-          enabled: root.debug
-          function onEngagedChanged() { root.log(peek.screenName + " placement=" + (peek.engaged ? "peek" : "native")) }
-          function onFullscreenInputChanged() { root.log(peek.screenName + " mask=" + (peek.fullscreenInput ? "peek" : "native")) }
-          function onHeldChanged() {
-            root.log(peek.screenName + " held=" + peek.held + " bar=" + peek.barHovered + " edge=" + peek.edgeHovered
-              + " catching=" + (edge ? edge.catching : null) + " popout=" + (root.activePopout !== null))
-          }
-        }
+    // Debug logging only.
+    Connections {
+      target: peek
+      enabled: root.debug
+      function onEngagedChanged() { root.log(peek.screenName + " placement=" + (peek.engaged ? "peek" : "native")) }
+      function onFullscreenInputChanged() { root.log(peek.screenName + " mask=" + (peek.fullscreenInput ? "peek" : "native")) }
+      function onHeldChanged() {
+        root.log(peek.screenName + " held=" + peek.held + " bar=" + peek.barHovered + " edge=" + peek.edgeHovered
+          + " catching=" + (edge ? edge.catching : null) + " popout=" + (root.activePopout !== null))
+      }
+    }
 
-        Connections {
-          target: edge
-          enabled: root.debug
-          function onCatchingChanged() { root.log(peek.screenName + " edge catching=" + edge.catching) }
-          function onVisibleChanged() { root.log(peek.screenName + " edge visible=" + edge.visible) }
-        }
+    Connections {
+      target: edge
+      enabled: root.debug
+      function onCatchingChanged() { root.log(peek.screenName + " edge catching=" + edge.catching) }
+      function onVisibleChanged() { root.log(peek.screenName + " edge visible=" + edge.visible) }
+    }
 
-        Connections {
-          target: peek.modelData
-          enabled: root.debug
-          ignoreUnknownSignals: true
-          function onUnderFullscreenChanged() { root.log(peek.screenName + " underFullscreen=" + peek.modelData.underFullscreen) }
-          function onExclusionModeChanged() { root.log(peek.screenName + " exclusionMode=" + PeekModel.exclusionName(peek.modelData.exclusionMode)) }
-        }
+    Connections {
+      target: peek.modelData
+      enabled: root.debug
+      ignoreUnknownSignals: true
+      function onUnderFullscreenChanged() { root.log(peek.screenName + " underFullscreen=" + peek.modelData.underFullscreen) }
+      function onExclusionModeChanged() { root.log(peek.screenName + " exclusionMode=" + PeekModel.exclusionName(peek.modelData.exclusionMode)) }
+    }
 
-        Connections {
-          target: peek.modelData ? peek.modelData.WlrLayershell : null
-          enabled: root.debug
-          ignoreUnknownSignals: true
-          function onLayerChanged() { root.log(peek.screenName + " layer=" + PeekModel.layerName(peek.modelData.WlrLayershell.layer)) }
-        }
+    Connections {
+      target: peek.modelData ? peek.modelData.WlrLayershell : null
+      enabled: root.debug
+      ignoreUnknownSignals: true
+      function onLayerChanged() { root.log(peek.screenName + " layer=" + PeekModel.layerName(peek.modelData.WlrLayershell.layer)) }
+    }
 
-        Binding {
-          target: peek.modelData
-          property: "margins.top"
-          value: Math.round(peek.offset)
-          when: peek.owning
-          restoreMode: Binding.RestoreBindingOrValue
-        }
+    Binding {
+      target: peek.modelData
+      property: "margins.top"
+      value: Math.round(peek.offset)
+      when: peek.owning
+      restoreMode: Binding.RestoreBindingOrValue
+    }
 
-        Binding {
-          target: peek.modelData.WlrLayershell
-          property: "layer"
-          value: WlrLayer.Overlay
-          when: peek.owning
-          restoreMode: Binding.RestoreBindingOrValue
-        }
+    Binding {
+      target: peek.modelData.WlrLayershell
+      property: "layer"
+      value: WlrLayer.Overlay
+      when: peek.owning
+      restoreMode: Binding.RestoreBindingOrValue
+    }
 
-        // A hidden bar reserves no space. A panel recreated for a monitor that
-        // reconnected can keep the normal exclusion mode while hidden, which
-        // pushes tiled windows down whenever the bar peeks.
-        Binding {
-          target: peek.modelData
-          property: "exclusionMode"
-          value: ExclusionMode.Ignore
-          when: peek.active
-          restoreMode: Binding.RestoreBindingOrValue
-        }
+    // A hidden bar reserves no space. A panel recreated for a monitor that
+    // reconnected can keep the normal exclusion mode while hidden, which
+    // pushes tiled windows down whenever the bar peeks.
+    Binding {
+      target: peek.modelData
+      property: "exclusionMode"
+      value: ExclusionMode.Ignore
+      when: peek.active
+      restoreMode: Binding.RestoreBindingOrValue
+    }
 
-        // Under a fullscreen window the native bar takes no input, so its
-        // invisible strip cannot steal clicks from the window. While peeking it
-        // is visible on the overlay layer, so give the strip its input back.
-        readonly property bool fullscreenInput: owning && !suppressed
-          && modelData.underFullscreen === true && modelData.dragActive !== true
+    // Under a fullscreen window the native bar takes no input, so its
+    // invisible strip cannot steal clicks from the window. While peeking it
+    // is visible on the overlay layer, so give the strip its input back.
+    readonly property bool fullscreenInput: owning && !suppressed
+      && modelData.underFullscreen === true && modelData.dragActive !== true
 
-        Region {
-          id: peekInputRegion
-          width: peek.modelData ? peek.modelData.width : 0
-          height: peek.thickness
-        }
+    Region {
+      id: peekInputRegion
+      width: peek.modelData ? peek.modelData.width : 0
+      height: peek.thickness
+    }
 
-        Binding {
-          target: peek.modelData
-          property: "mask"
-          value: peekInputRegion
-          when: peek.fullscreenInput
-          restoreMode: Binding.RestoreBindingOrValue
-        }
+    Binding {
+      target: peek.modelData
+      property: "mask"
+      value: peekInputRegion
+      when: peek.fullscreenInput
+      restoreMode: Binding.RestoreBindingOrValue
+    }
 
-        HoverHandler {
-          id: barHover
-          // Observe from an ancestor. A sibling overlay suppresses native
-          // widget hover handlers, including the tray drawer, even if passive.
-          parent: peek.modelData.contentItem
-          blocking: false
-          onHoveredChanged: {
-            if (hovered && root.barHidden && peek.enabledHere && !peek.suppressed) peek.setRevealed(true, "bar")
-            if (!hovered && peek.engaged) peek.probeLeave("leave")
-          }
-        }
+    HoverHandler {
+      id: barHover
+      // Observe from an ancestor. A sibling overlay suppresses native
+      // widget hover handlers, including the tray drawer, even if passive.
+      parent: peek.modelData.contentItem
+      blocking: false
+      onHoveredChanged: {
+        if (hovered && root.barHidden && peek.enabledHere && !peek.suppressed) peek.setRevealed(true, "bar")
+        if (!hovered && peek.engaged) leaveProbe.start("leave")
+      }
+    }
 
-        function probeLeave(reason) {
-          if (!root.debug) return
-          root.log(screenName + " probe start: " + reason + " running=" + leaveProbe.running)
-          if (!leaveProbe.running) leaveProbe.running = true
-        }
+    LeaveProbe { id: leaveProbe; peek: peek }
 
-        // Debug only: where the pointer really is when the bar reports a leave.
-        Process {
-          id: leaveProbe
-          onExited: (code, status) => root.log(peek.screenName + " probe exited code=" + code)
-          command: ["hyprctl", "cursorpos", "-j"]
-          stdout: StdioCollector {
-            waitForEnd: true
-            onStreamFinished: {
-              let inside = "?"
-              try {
-                inside = PeekModel.pointerOnBar(JSON.parse(text), peek.modelData.screen, peek.thickness, peek.offset)
-              } catch (error) {}
-              root.log(peek.screenName + " bar leave: cursor=" + text.replace(/\s+/g, "") + " insideBar=" + inside
-                + " offset=" + Math.round(peek.offset) + " tooltip=" + root.tooltipShown
-                + " popout=" + (root.activePopout !== null))
-            }
-          }
-        }
+    Timer {
+      interval: root.hideDelay
+      running: peek.revealed && !peek.held
+      onTriggered: if (!peek.held) peek.setRevealed(false, "timer")
+    }
 
-        Timer {
-          interval: root.hideDelay
-          running: peek.revealed && !peek.held
-          onTriggered: if (!peek.held) peek.setRevealed(false, "timer")
-        }
+    EdgeTrigger { id: edge; peek: peek }
+  }
 
-        PanelWindow {
-          id: edge
-          // While suppressed the edge stays mapped but takes no input, so the
-          // pointer reaches the window's own bar whatever the overlay order.
-          readonly property bool catching: visible && !peek.suppressed && (!peek.revealed || !peek.barHovered)
-          screen: peek.modelData.screen
-          visible: peek.active && !edgeRemap.remapping
-          color: "transparent"
-          implicitHeight: root.edgeHeight
-          anchors { top: true; left: true; right: true }
-          exclusionMode: ExclusionMode.Ignore
-          // Hand input back after the pointer enters the bar. Clearing the
-          // mask at animation end alone may not generate a new pointer enter.
-          mask: Region { width: edge.catching ? edge.width : 0; height: root.edgeHeight }
-          WlrLayershell.namespace: "omarchy-topbar-plus-edge"
-          WlrLayershell.layer: WlrLayer.Overlay
-          WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+  // A two-pixel strip along the top edge that reveals the bar.
+  component EdgeTrigger: PanelWindow {
+    id: edge
+    required property var peek
+    readonly property bool hovered: edgeHover.hovered
+    // While suppressed the edge stays mapped but takes no input, so the
+    // pointer reaches the window's own bar whatever the overlay order.
+    readonly property bool catching: visible && !peek.suppressed && (!peek.revealed || !peek.barHovered)
+    screen: peek.modelData.screen
+    visible: peek.active && !edgeRemap.remapping
+    color: "transparent"
+    implicitHeight: root.edgeHeight
+    anchors { top: true; left: true; right: true }
+    exclusionMode: ExclusionMode.Ignore
+    // Hand input back after the pointer enters the bar. Clearing the
+    // mask at animation end alone may not generate a new pointer enter.
+    mask: Region { width: edge.catching ? edge.width : 0; height: root.edgeHeight }
+    WlrLayershell.namespace: "omarchy-topbar-plus-edge"
+    WlrLayershell.layer: WlrLayer.Overlay
+    WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
 
-          ScreenMoveRemap { id: edgeRemap; window: edge }
+    ScreenMoveRemap { id: edgeRemap; window: edge }
 
-          HoverHandler {
-            id: edgeHover
-            onHoveredChanged: if (hovered && !peek.suppressed) peek.setRevealed(true, "edge")
-          }
-        }
+    HoverHandler {
+      id: edgeHover
+      onHoveredChanged: if (hovered && !edge.peek.suppressed) edge.peek.setRevealed(true, "edge")
+    }
+  }
+
+  // Debug only: where the pointer really is when the bar reports a leave.
+  component LeaveProbe: Process {
+    id: probe
+    required property var peek
+
+    function start(reason) {
+      if (!root.debug) return
+      root.log(peek.screenName + " probe start: " + reason + " running=" + running)
+      if (!running) running = true
+    }
+
+    command: ["hyprctl", "cursorpos", "-j"]
+    onExited: (code, status) => root.log(probe.peek.screenName + " probe exited code=" + code)
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        const peek = probe.peek
+        let inside = "?"
+        try {
+          inside = PeekModel.pointerOnBar(JSON.parse(text), peek.modelData.screen, peek.thickness, peek.offset)
+        } catch (error) {}
+        root.log(peek.screenName + " bar leave: cursor=" + text.replace(/\s+/g, "") + " insideBar=" + inside
+          + " offset=" + Math.round(peek.offset) + " tooltip=" + root.tooltipShown
+          + " popout=" + (root.activePopout !== null))
       }
     }
   }
