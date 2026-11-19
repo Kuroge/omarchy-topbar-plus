@@ -186,14 +186,6 @@ Native.Bar {
           tray: root.trayState(p.modelData)
         })) })
     }
-    function probe(): string {
-      for (const p of peekControllers.instances) p.probeLeave("ipc")
-      return "probing " + peekControllers.instances.length
-    }
-    function nudge(): string {
-      for (const p of peekControllers.instances) p.nudgePointer("ipc")
-      return "nudging " + peekControllers.instances.length
-    }
     function setDebug(enabled: bool): string {
       root.debug = enabled
       root.log("debug enabled; panels: " + root.screenNames(root.peekWindows))
