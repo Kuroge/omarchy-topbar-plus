@@ -117,6 +117,28 @@ def reconnect(name):
     print(f"RECONNECTED {name}: outputs off and on again")
 
 
+def check_reconnect(name):
+    # A tagged fullscreen window that outlives its monitor's reconnection must
+    # keep the suppression in step with Hyprland.
+    monitor = next((m for m in json.loads(run("hyprctl", "monitors", "-j")) if m["name"] == name), None)
+    assert monitor, f"Monitor not found: {name}"
+    focused = json.loads(run("hyprctl", "activewindow", "-j") or "{}")
+    processes = []
+    try:
+        window = open_check_window(monitor, processes, PEEK_SUPPRESSING_TAG)
+        set_fullscreen(window, "fullscreen")
+        wait_for(lambda s: screen_panel(name)(s)["suppressed"])
+        reconnect(name)
+        assert_suppression_matches_hyprland()
+        print(f"PASS {name}: suppression matches Hyprland after the reconnect")
+    finally:
+        cleanup(
+            lambda: close_check_windows(processes),
+            lambda: focused.get("address") and dispatch(
+                f'hl.dsp.focus({{ window = "address:{focused["address"]}" }})'),
+        )
+
+
 def close_popouts():
     # Toggling the clock closes it, or switches any other popout, including
     # tray management, to the clock so the next toggle closes it.
@@ -594,7 +616,7 @@ if __name__ == "__main__":
                         help="also check every bar background with desktop background enabled/disabled")
     args = parser.parse_args()
     if args.reconnect:
-        reconnect(args.reconnect)
+        check_reconnect(args.reconnect)
         args.monitor = args.reconnect
     if not args.appearance:
         check(args.monitor)

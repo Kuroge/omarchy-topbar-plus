@@ -105,12 +105,13 @@ Native.Bar {
     }
   }
 
+  // Keyed by workspace, the list does not change when another workspace
+  // becomes active or a monitor returns; only window events change it.
   Connections {
     target: Hyprland
     function onRawEvent(event) {
       const name = event ? String(event.name) : ""
-      if (["fullscreen", "openwindow", "closewindow", "movewindowv2", "workspacev2",
-           "monitoraddedv2", "configreloaded"].includes(name))
+      if (["fullscreen", "openwindow", "closewindow", "movewindowv2", "configreloaded"].includes(name))
         root.queryClients()
     }
   }
