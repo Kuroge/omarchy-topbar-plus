@@ -6,7 +6,7 @@ Aquí se apuntan los cambios importantes de Omarchy Top Bar Plus. El formato sig
 [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y la numeración de
 versiones, el [versionado semántico](https://semver.org/lang/es/).
 
-## [0.3.0] - 2026-11-19
+## [0.3.0] - 2026-11-20
 
 Primera versión pública.
 
@@ -30,6 +30,11 @@ Primera versión pública.
 - Pruebas unitarias de `PeekModel.js`: `node --test tests/`.
 - `check.py --reconnect` mantiene abierta una ventana etiquetada a pantalla
   completa mientras se reconecta el monitor.
+
+### Correcciones
+
+- Ya no aparece un `TypeError` en el registro del shell al instalar, actualizar o
+  recargar el plugin.
 
 ### Eliminado
 
