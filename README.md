@@ -31,8 +31,21 @@ inherits the bar you already have.
 
 ![The bar sliding in from the top edge and out again](assets/demo.gif)
 
+## Why
+
+Among other things, to spare OLED screens as much as possible. A bar that
+never moves is exactly what an OLED panel handles worst: the same icons and
+text on the same pixels, hour after hour, can leave a permanent mark, known as
+burn-in. Omarchy can already hide the bar, but then it is gone when you need
+it. Top Bar Plus brings it back the moment you reach the top edge, so you can
+keep it hidden for good: it is only on screen while you use it, and the rest
+of the time that strip shows your windows and wallpaper like the rest of the
+screen.
+
 ## Features
 
+- 🛡️ **Kinder to OLED screens.** No static bar burning into the top of the
+  panel; it only shows up while you use it.
 - 🖱️ **Peek per monitor.** Each screen has its own two-pixel trigger along the
   top edge and reveals only its own bar.
 - 🪟 **Over your windows, never pushing them.** A peeking bar reserves no
@@ -68,8 +81,8 @@ inherits the bar you already have.
 | [Quickshell](https://quickshell.org/) | 0.3 |
 
 Nothing else at runtime. Top Bar Plus builds on internal details of Omarchy
-4.5's bar, so other Omarchy versions may need an update of the plugin. It only
-works with the bar at the top.
+4.5's bar, so other Omarchy versions may need an update of the plugin. For now,
+it only works with the bar at the top.
 
 ## Install
 
@@ -93,12 +106,16 @@ omarchy plugin remove io.github.kuroge.topbar-plus --yes   # optional, after swi
 ## Apps with their own top bar
 
 Some fullscreen apps slide down their own bar from the top edge, such as the
-session bar of the RDPchy remote desktop client. Give their windows the
-`no-bar-peek` tag with a Hyprland window rule, for example in
-`~/.config/hypr/hyprland.lua`:
+session bar of RDPchy, a remote desktop client for Omarchy. RDPchy already
+tags its session windows this way out of the box, so there is nothing to do
+for it. RDPchy is still private, so you will not find it on GitHub yet.
+
+For any other app, give its windows the `no-bar-peek` tag with a Hyprland
+window rule, for example in `~/.config/hypr/hyprland.lua`. `hyprctl clients`
+shows the `class` to match:
 
 ```lua
-o.window("^com\\.freerdp\\.client\\.sdl3$", { tag = "+no-bar-peek" })
+o.window("^org\\.example\\.App$", { tag = "+no-bar-peek" })
 ```
 
 While a tagged window is fullscreen or maximized on a screen's active
@@ -143,8 +160,8 @@ written for Omarchy 4.0.4. On Omarchy 4.5:
 - The QML inheritance and panel discovery use **internal bar implementation
   details**, not a promised stable Omarchy API. Omarchy updates may require a
   plugin update.
-- Top bars only. With the bar at the bottom or on a side, the stock behaviour
-  stays.
+- Top bars only, for now. With the bar at the bottom or on a side, the stock
+  behaviour stays.
 - Hyprland sends no event when a tag changes. A tag added by hand to a window
   that is already fullscreen takes effect at the next window event: a
   fullscreen change, or a window opening, closing or moving. Tags set by a
