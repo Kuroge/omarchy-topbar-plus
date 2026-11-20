@@ -11,6 +11,7 @@
 [![Hyprland 0.56](https://img.shields.io/badge/Hyprland-0.56-83c092?style=for-the-badge&logo=hyprland&logoColor=white)](https://hyprland.org/)
 [![Quickshell 0.3](https://img.shields.io/badge/Quickshell-0.3-d699b6?style=for-the-badge&logo=qt&logoColor=white)](https://quickshell.org/)
 [![Licencia MIT](https://img.shields.io/badge/licencia-MIT-dbbc7f?style=for-the-badge)](LICENSE)
+[![Omarchy Plugins](https://img.shields.io/badge/Omarchy_Plugins-listed-e69875?style=for-the-badge)](https://omarchyplugins.com/plugin.html?id=io.github.kuroge.topbar-plus)
 
 **[⬇️ Instalar](#instalación)** ·
 **[📋 Novedades](CHANGELOG.es.md)** ·

@@ -3,8 +3,9 @@
   "id": "io.github.kuroge.topbar-plus",
   "name": "Omarchy Top Bar Plus",
   "version": "0.3.0",
-  "author": "Adrian Garcia Riera <35804986+Kuroge@users.noreply.github.com>",
-  "description": "Reveal the hidden Omarchy top bar per monitor at the screen edge, over windows.",
+  "author": "Adrian Garcia Riera",
+  "description": "Keeps the Omarchy top bar hidden and slides it in when you touch the top edge of a monitor. It shows over your windows, tiled or fullscreen, without pushing them, and hides again when you move away. Per monitor, nothing running at rest, and windows tagged no-bar-peek keep the edge for their own bar. Easy on OLED screens: no static bar burning in.",
+  "license": "MIT",
   "kinds": ["bar"],
   "entryPoints": { "bar": "Bar.qml" },
   "omarchy": { "clonedFrom": "omarchy.bar" }
