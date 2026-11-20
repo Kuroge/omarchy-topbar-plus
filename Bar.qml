@@ -87,8 +87,22 @@ Native.Bar {
     onExited: (code, status) => {
       if (!root.clientsQueryPending) return
       root.clientsQueryPending = false
-      Qt.callLater(root.queryClients)
+      clientsRequery.restart()
     }
+  }
+
+  // Deferred work runs from timers the bar owns, so none of it reaches an
+  // instance that a plugin reload is tearing down.
+  Timer {
+    id: clientsRequery
+    interval: 0
+    onTriggered: root.queryClients()
+  }
+
+  Timer {
+    id: panelSearch
+    interval: 0
+    onTriggered: root.findBarPanels()
   }
 
   // Keyed by workspace, the list does not change when another workspace
@@ -103,14 +117,14 @@ Native.Bar {
   }
 
   Component.onCompleted: {
-    Qt.callLater(findBarPanels)
+    panelSearch.restart()
     queryClients()
   }
   Connections {
     target: Quickshell
     function onScreensChanged() {
       root.log("screens changed: " + Array.from(Quickshell.screens, s => s.name).join(", "))
-      Qt.callLater(root.findBarPanels)
+      panelSearch.restart()
     }
   }
 
@@ -192,11 +206,14 @@ Native.Bar {
     required property var modelData
     readonly property string screenName: modelData && modelData.screen ? modelData.screen.name : "?"
     property bool ready: false
-    Component.onCompleted: {
-      Qt.callLater(() => ready = true)
-      root.log(screenName + " controller created")
-    }
+    Component.onCompleted: root.log(screenName + " controller created")
     Component.onDestruction: root.log(screenName + " controller destroyed")
+    // Bindings take over the panel only after the native bar has settled.
+    Timer {
+      interval: 0
+      running: true
+      onTriggered: peek.ready = true
+    }
     readonly property bool enabledHere: root.position === "top"
     // Active: the bar is hidden and peeks here. Owning: it is peeking now.
     readonly property bool active: ready && enabledHere && root.barHidden
